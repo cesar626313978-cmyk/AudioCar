@@ -1,0 +1,8 @@
+{
+  "name": "AudioCar - In-Car Google Drive Music Player",
+  "description": "High-contrast automotive touchscreen music player & PWA streaming directly from Google Drive, optimized for 15.4\" 1920x1200 infotainment cockpit screens with MediaSession and offline caching.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

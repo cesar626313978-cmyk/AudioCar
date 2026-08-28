@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Política de Privacidad - AudioCar</title>
+  <style>
+    :root {
+      --bg: #0d0d12;
+      --card-bg: #14141c;
+      --border: #272733;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.2);
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      margin: 0;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 780px;
+      margin: 0 auto;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 40px 32px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+    }
+    .header {
+      border-b: 1px solid var(--border);
+      padding-bottom: 24px;
+      margin-bottom: 32px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .logo {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      color: #000;
+      font-size: 20px;
+    }
+    h1 {
+      font-size: 26px;
+      margin: 0;
+      color: #ffffff;
+      letter-spacing: -0.5px;
+    }
+    .updated {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    h2 {
+      font-size: 18px;
+      color: var(--accent);
+      margin-top: 28px;
+      margin-bottom: 12px;
+    }
+    p, li {
+      font-size: 15px;
+      color: #cbd5e1;
+    }
+    ul {
+      padding-left: 20px;
+    }
+    li {
+      margin-bottom: 8px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 600;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      margin-bottom: 16px;
+    }
+    .footer {
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      font-size: 13px;
+      color: var(--text-muted);
+      text-align: center;
+    }
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">AC</div>
+      <div>
+        <h1>Política de Privacidad de AudioCar</h1>
+        <div class="updated">Última actualización: 26 de agosto de 2026</div>
+      </div>
+    </div>
+
+    <div class="badge">Protección de Datos y Privacidad Garantizada</div>
+
+    <h2>1. Información General</h2>
+    <p>
+      <strong>AudioCar</strong> es una aplicación web y cliente de audio para vehículos y pantallas táctiles diseñada para permitir la reproducción en streaming de archivos de audio personales alojados en Google Drive de forma directa, privada y segura.
+    </p>
+
+    <h2>2. Uso de Datos de Google Drive y Permisos Solicitados</h2>
+    <p>AudioCar solicita acceso mediante el protocolo estándar de autenticación OAuth 2.0 de Google con los siguientes ámbitos estrictamente necesarios:</p>
+    <ul>
+      <li><strong>https://www.googleapis.com/auth/drive.readonly:</strong> Se utiliza exclusivamente para listar, leer metadatos (título, artista, duración, carátulas) y transmitir en streaming los archivos multimedia alojados dentro de la carpeta designada por el usuario (denominada por defecto <code>mimusica</code>).</li>
+      <li><strong>https://www.googleapis.com/auth/drive.appdata:</strong> Se utiliza para almacenar y sincronizar preferencias de reproducción y listas creadas por el usuario dentro del almacenamiento privado de la aplicación, sin modificar archivos externos.</li>
+    </ul>
+
+    <h2>3. Almacenamiento y Protección de Datos</h2>
+    <p>
+      AudioCar <strong>no almacena, no transfiere ni vende</strong> tus archivos de música, credenciales de cuenta, datos personales ni hábitos de escucha a servidores de terceros ni intermediarios. Todo el procesamiento de audio, ecualización y metadatos se realiza de manera local en el navegador del dispositivo del usuario (mediante Web Audio API e IndexedDB local).
+    </p>
+
+    <h2>4. Cumplimiento de la Política de Datos de Usuario de Google</h2>
+    <p>
+      El uso y la transferencia a cualquier otra aplicación de la información recibida de las API de Google por parte de AudioCar se adherirán a la <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer">Política de Datos de Usuario de los Servicios de la API de Google</a>, incluidos los requisitos de <em>Uso Limitado</em> (Limited Use).
+    </p>
+
+    <h2>5. Revocación del Acceso</h2>
+    <p>
+      Los usuarios pueden desconectar su cuenta de Google en cualquier momento desde la interfaz de AudioCar pulsando "Cerrar Sesión" o gestionando los permisos de acceso de aplicaciones de terceros directamente desde <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer">Google Account Permissions</a>.
+    </p>
+
+    <h2>6. Contacto</h2>
+    <p>
+      Para cualquier duda o consulta relativa a esta política de privacidad, puedes contactar con el desarrollador en: <a href="mailto:cesar626313978@gmail.com">cesar626313978@gmail.com</a>.
+    </p>
+
+    <div class="footer">
+      © 2026 AudioCar. Todos los derechos reservados.
+    </div>
+  </div>
+</body>
+</html>
