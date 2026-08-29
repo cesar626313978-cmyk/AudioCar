@@ -85,6 +85,7 @@ class AudioEngine {
   private mediaSessionSyncInterval: any = null;
   private lazyPrefetchTimer: any = null;
   private hasTriggeredLazyPrefetch = false;
+  private fadeOutTimer: any = null;
 
   constructor() {
     this.audioA = new Audio();
@@ -830,6 +831,11 @@ class AudioEngine {
   }
 
   public async play() {
+    if (this.fadeOutTimer) {
+      clearTimeout(this.fadeOutTimer);
+      this.fadeOutTimer = null;
+    }
+
     if (this.activeAudio.src && this.state.currentTrackIndex !== -1) {
       try {
         if (this.audioContext && this.audioContext.state === 'suspended') {
@@ -842,8 +848,14 @@ class AudioEngine {
           this.activeGainNode.gain.cancelScheduledValues(now);
           this.activeGainNode.gain.setValueAtTime(0, now);
           this.activeGainNode.gain.linearRampToValueAtTime(1.0, now + this.state.fadeInOutDuration);
+        } else if (this.activeGainNode && this.audioContext) {
+          const now = this.audioContext.currentTime;
+          this.activeGainNode.gain.cancelScheduledValues(now);
+          this.activeGainNode.gain.setValueAtTime(1.0, now);
         }
 
+        this.state.isPlaying = true;
+        this.notifyListeners();
         await this.activeAudio.play();
       } catch (e) {
         console.warn('Play interrupted:', e);
@@ -855,22 +867,33 @@ class AudioEngine {
   }
 
   public pause() {
-    // Desvanecimiento (Fade out)
-    if (this.state.isFadeInOutEnabled && this.activeGainNode && this.audioContext && this.state.isPlaying) {
-      const now = this.audioContext.currentTime;
-      this.activeGainNode.gain.cancelScheduledValues(now);
-      this.activeGainNode.gain.setValueAtTime(1.0, now);
-      this.activeGainNode.gain.linearRampToValueAtTime(0, now + this.state.fadeInOutDuration);
+    if (this.fadeOutTimer) {
+      clearTimeout(this.fadeOutTimer);
+      this.fadeOutTimer = null;
+    }
 
-      setTimeout(() => {
-        this.activeAudio.pause();
-        this.state.isPlaying = false;
-        this.notifyListeners();
+    // Actualización inmediata del estado visual a "Pausa" para respuesta instantánea en la UI
+    this.state.isPlaying = false;
+    this.notifyListeners();
+    this.stopMediaSessionPositionSync();
+    this.persistCurrentSessionState();
+
+    // Desvanecimiento gradual del audio en segundo plano (Fade out)
+    if (this.state.isFadeInOutEnabled && this.activeGainNode && this.audioContext) {
+      const now = this.audioContext.currentTime;
+      const currentGain = this.activeGainNode.gain.value || 1.0;
+      this.activeGainNode.gain.cancelScheduledValues(now);
+      this.activeGainNode.gain.setValueAtTime(currentGain, now);
+      this.activeGainNode.gain.linearRampToValueAtTime(0.0001, now + this.state.fadeInOutDuration);
+
+      this.fadeOutTimer = setTimeout(() => {
+        if (!this.state.isPlaying) {
+          this.activeAudio.pause();
+        }
+        this.fadeOutTimer = null;
       }, this.state.fadeInOutDuration * 1000);
     } else {
       this.activeAudio.pause();
-      this.state.isPlaying = false;
-      this.notifyListeners();
     }
   }
 

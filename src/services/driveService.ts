@@ -296,15 +296,21 @@ export class DriveService {
    * Search and list all audio files ONLY inside "mimusica" and its subdirectories.
    * Iterates through all pages using `nextPageToken` to guarantee 100% of songs are returned.
    */
-  async listAudioFiles(folderId?: string, searchFilter?: string): Promise<AudioTrack[]> {
+  async listAudioFiles(
+    folderId?: string,
+    searchFilter?: string,
+    onProgress?: (progress: { percent: number; step: string }) => void
+  ): Promise<AudioTrack[]> {
     const token = authService.getAccessToken();
     if (!token) throw new Error('Usuario no autenticado en Google Drive');
 
+    onProgress?.({ percent: 20, step: 'Localizando carpeta /mimusica...' });
     const musicRoot = await this.getMusicRootFolder(false);
     if (!musicRoot) {
       return [];
     }
 
+    onProgress?.({ percent: 35, step: 'Explorando subcarpetas de música...' });
     // Discover full folder hierarchy
     const hierarchy = await this.getAllSubfoldersHierarchy(musicRoot);
 
@@ -319,12 +325,20 @@ export class DriveService {
 
     if (targetFolderIds.length === 0) return [];
 
+    onProgress?.({ percent: 50, step: `Buscando pistas de audio en ${targetFolderIds.length} carpeta(s)...` });
+
     const chunkSize = 10;
     const allFiles: any[] = [];
 
     for (let i = 0; i < targetFolderIds.length; i += chunkSize) {
       const batchIds = targetFolderIds.slice(i, i + chunkSize);
       const parentFilter = batchIds.map((id) => `'${id}' in parents`).join(' or ');
+
+      const batchProgressPercent = Math.min(80, Math.round(50 + ((i + 1) / targetFolderIds.length) * 30));
+      onProgress?.({
+        percent: batchProgressPercent,
+        step: `Leyendo archivos de audio (${allFiles.length} canciones encontradas)...`
+      });
 
       // Query all non-folder files within these parent folders
       let queryParts = [
@@ -391,6 +405,9 @@ export class DriveService {
 
     // Resolve artwork for parents of the found tracks
     const uniqueParentIds = Array.from(new Set(validAudioFiles.map((f: any) => f.parents?.[0]).filter(Boolean))) as string[];
+    if (uniqueParentIds.length > 0) {
+      onProgress?.({ percent: 85, step: 'Recuperando carátulas e información de álbumes...' });
+    }
     for (const parentId of uniqueParentIds) {
       if (!this.folderArtworkCache.has(parentId)) {
         await this.discoverFolderArtwork(parentId).catch(() => {});
@@ -440,11 +457,13 @@ export class DriveService {
       };
     });
 
+    onProgress?.({ percent: 95, step: 'Indexando biblioteca en almacenamiento local...' });
     // Save to IndexedDB cache
     if (tracks.length > 0) {
       await dbService.saveTracks(tracks).catch(() => {});
     }
 
+    onProgress?.({ percent: 100, step: `¡Sincronización completada! ${tracks.length} canciones encontradas.` });
     return tracks;
   }
 

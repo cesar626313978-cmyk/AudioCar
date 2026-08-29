@@ -79,16 +79,23 @@ class CloudService {
     };
   }
 
-  public async syncLibrary(targetProviderId?: CloudProviderType): Promise<{ tracks: AudioTrack[]; folders: DriveFolder[] }> {
-    const res = await this.syncLibraryDetailed(targetProviderId);
+  public async syncLibrary(
+    targetProviderId?: CloudProviderType,
+    onProgress?: (progress: { percent: number; step: string }) => void
+  ): Promise<{ tracks: AudioTrack[]; folders: DriveFolder[] }> {
+    const res = await this.syncLibraryDetailed(targetProviderId, onProgress);
     return { tracks: res.tracks, folders: res.folders };
   }
 
-  public async syncLibraryDetailed(targetProviderId?: CloudProviderType): Promise<CloudSyncResult> {
+  public async syncLibraryDetailed(
+    targetProviderId?: CloudProviderType,
+    onProgress?: (progress: { percent: number; step: string }) => void
+  ): Promise<CloudSyncResult> {
     const provider = targetProviderId ? this.getProvider(targetProviderId) : this.getActiveProvider();
     
     // Check if Google Drive is active but user is not logged in
     if (provider.providerId === 'drive') {
+      onProgress?.({ percent: 10, step: 'Verificando sesión de Google Drive...' });
       const user = authService.getUser();
       if (!user) {
         return {
@@ -103,6 +110,7 @@ class CloudService {
       }
 
       // Check if root folder "/mimusica" exists
+      onProgress?.({ percent: 20, step: 'Localizando carpeta /mimusica en Google Drive...' });
       const rootFolder = await driveService.getMusicRootFolder(false);
       if (!rootFolder) {
         return {
@@ -118,10 +126,11 @@ class CloudService {
       }
 
       try {
-        const [tracks, folders] = await Promise.all([
-          provider.listTracks(),
-          provider.listFolders()
-        ]);
+        onProgress?.({ percent: 35, step: 'Explorando estructura de carpetas...' });
+        const folders = await provider.listFolders();
+
+        onProgress?.({ percent: 45, step: `Descubriendo canciones en ${folders.length} carpetas...` });
+        const tracks = await (provider as any).listTracks(undefined, onProgress);
 
         if (tracks.length > 0) {
           await dbService.saveTracks(tracks).catch(() => {});
@@ -129,6 +138,8 @@ class CloudService {
         if (folders.length > 0) {
           await dbService.saveFolders(folders).catch(() => {});
         }
+
+        onProgress?.({ percent: 100, step: `¡Sincronización completada! ${tracks.length} canciones listas.` });
 
         return {
           status: 'synced',
@@ -157,10 +168,12 @@ class CloudService {
     }
 
     // Fallback for demo or other providers
+    onProgress?.({ percent: 50, step: 'Cargando biblioteca demo...' });
     const [tracks, folders] = await Promise.all([
       provider.listTracks(),
       provider.listFolders()
     ]);
+    onProgress?.({ percent: 100, step: 'Biblioteca demo lista.' });
 
     if (tracks.length > 0) {
       await dbService.saveTracks(tracks).catch(() => {});

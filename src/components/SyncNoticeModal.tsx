@@ -119,17 +119,17 @@ export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
               <button
                 onClick={handleConnectGoogle}
                 disabled={isProcessing}
-                className="w-full sm:flex-1 hitbox-48 h-12 rounded-xl bg-white hover:bg-neutral-200 text-black font-extrabold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg disabled:opacity-50"
+                className="w-full sm:flex-1 hitbox-48 h-12 px-5 rounded-xl bg-white hover:bg-neutral-200 text-black font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg disabled:opacity-50 whitespace-nowrap shrink-0"
               >
                 {isProcessing ? (
                   <>
-                    <RefreshCw className="w-4 h-4 animate-spin text-black" />
-                    <span>Conectando con Google...</span>
+                    <RefreshCw className="w-4 h-4 animate-spin text-black shrink-0" />
+                    <span className="whitespace-nowrap">Conectando con Google...</span>
                   </>
                 ) : (
                   <>
-                    <LogIn className="w-4 h-4 text-black" />
-                    <span>Elegir cuenta de Google</span>
+                    <LogIn className="w-4 h-4 text-black shrink-0" />
+                    <span className="whitespace-nowrap">Elegir cuenta de Google</span>
                   </>
                 )}
               </button>
@@ -137,7 +137,7 @@ export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
               <button
                 onClick={onClose}
                 disabled={isProcessing}
-                className="w-full sm:w-auto hitbox-48 h-12 px-6 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-700 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                className="w-full sm:w-auto hitbox-48 h-12 px-6 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-700 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
                 Cancelar
               </button>
