@@ -1,13 +1,11 @@
 /**
  * Unified Cloud Service Manager - AudioCar
- * Manages Multi-Cloud Providers (Google Drive, Microsoft OneDrive, Dropbox, Demo Mode).
- * Agnostic audio routing, folder traversal, session persistence and synchronization.
+ * Dedicated to Google Drive (and local / demo mode).
+ * Direct audio routing, folder traversal, session persistence and synchronization.
  */
 
 import { AudioTrack, DriveFolder, CloudMusicProvider, CloudProviderType, CloudUserSession } from '../types';
 import { googleDriveProvider } from './providers/GoogleDriveProvider';
-import { oneDriveProvider } from './providers/OneDriveProvider';
-import { dropboxProvider } from './providers/DropboxProvider';
 import { demoProvider } from './providers/DemoProvider';
 import { dbService } from './dbService';
 
@@ -22,8 +20,6 @@ class CloudService {
 
   constructor() {
     this.providers.set('drive', googleDriveProvider);
-    this.providers.set('onedrive', oneDriveProvider);
-    this.providers.set('dropbox', dropboxProvider);
     this.providers.set('demo', demoProvider);
 
     this.loadActiveProvider();
@@ -35,16 +31,7 @@ class CloudService {
       if (saved && this.providers.has(saved)) {
         this.activeProviderId = saved;
       } else {
-        // Auto-select first configured provider
-        if (googleDriveProvider.isConfigured()) {
-          this.activeProviderId = 'drive';
-        } else if (oneDriveProvider.isConfigured()) {
-          this.activeProviderId = 'onedrive';
-        } else if (dropboxProvider.isConfigured()) {
-          this.activeProviderId = 'dropbox';
-        } else {
-          this.activeProviderId = 'drive';
-        }
+        this.activeProviderId = 'drive';
       }
     } catch {
       this.activeProviderId = 'drive';
@@ -73,8 +60,6 @@ class CloudService {
   public getAllSessions(): Record<CloudProviderType, CloudUserSession | null> {
     return {
       drive: googleDriveProvider.getSession(),
-      onedrive: oneDriveProvider.getSession(),
-      dropbox: dropboxProvider.getSession(),
       demo: demoProvider.getSession()
     };
   }
@@ -102,7 +87,7 @@ class CloudService {
   }
 
   /**
-   * Agnostic streaming resolver
+   * Direct streaming resolver
    * Dispatches to the corresponding cloud provider based on track source
    */
   public async getStreamUrl(track: AudioTrack): Promise<string> {
@@ -111,10 +96,6 @@ class CloudService {
     }
 
     switch (track.source) {
-      case 'onedrive':
-        return await oneDriveProvider.getStreamUrl(track);
-      case 'dropbox':
-        return await dropboxProvider.getStreamUrl(track);
       case 'drive':
         return await googleDriveProvider.getStreamUrl(track);
       case 'demo':
@@ -127,10 +108,6 @@ class CloudService {
 
   public async prefetchTrack(track: AudioTrack): Promise<boolean> {
     switch (track.source) {
-      case 'onedrive':
-        return await oneDriveProvider.prefetchStream(track);
-      case 'dropbox':
-        return await dropboxProvider.prefetchStream(track);
       case 'drive':
         return await googleDriveProvider.prefetchStream(track);
       default:
@@ -142,21 +119,9 @@ class CloudService {
     const provider = this.getProvider(id);
     await provider.logout();
 
-    // If currently active provider was logged out, switch to another connected provider or drive
-    if (this.activeProviderId === id) {
-      const remainingSessions = this.getAllSessions();
-      if (remainingSessions.drive) {
-        this.setActiveProvider('drive');
-      } else if (remainingSessions.onedrive) {
-        this.setActiveProvider('onedrive');
-      } else if (remainingSessions.dropbox) {
-        this.setActiveProvider('dropbox');
-      } else {
-        this.setActiveProvider('drive');
-      }
-    } else {
-      this.notifyListeners();
-    }
+    // Reset to drive
+    this.setActiveProvider('drive');
+    this.notifyListeners();
   }
 
   public subscribe(listener: CloudListener): () => void {
@@ -172,3 +137,4 @@ class CloudService {
 }
 
 export const cloudService = new CloudService();
+

@@ -394,15 +394,11 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                                 {track.artworkFormat}
                               </span>
                             )}
-                            {track.source === 'onedrive' ? (
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-950/60 text-sky-300 font-mono border border-sky-800">ONEDRIVE</span>
-                            ) : track.source === 'dropbox' ? (
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-950/60 text-indigo-300 font-mono border border-indigo-800">DROPBOX</span>
-                            ) : track.source === 'drive' ? (
+                            {track.source === 'drive' ? (
                               <span className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-300 font-mono border border-neutral-700">DRIVE</span>
-                            ) : (
+                            ) : track.source === 'demo' ? (
                               <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-300 font-mono border border-amber-800">DEMO</span>
-                            )}
+                            ) : null}
                           </div>
                         </div>
                       </div>

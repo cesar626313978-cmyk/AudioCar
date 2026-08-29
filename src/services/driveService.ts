@@ -9,6 +9,7 @@
 import { AudioTrack, DriveFolder, Playlist, ImageFormat } from '../types';
 import { authService } from './authService';
 import { dbService } from './dbService';
+import { fetchWithDriveBackoff } from './driveBackoff';
 
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
 export const MUSIC_ROOT_FOLDER_NAME = 'mimusica';
@@ -91,7 +92,7 @@ export class DriveService {
       const q = encodeURIComponent(`mimeType = 'application/vnd.google-apps.folder' and trashed = false and (${queryNameFilters})`);
       const url = `${DRIVE_API_URL}/files?q=${q}&fields=files(id, name, parents, modifiedTime)&pageSize=100&orderBy=name`;
 
-      const res = await fetch(url, { headers: this.getHeaders(token) });
+      const res = await fetchWithDriveBackoff(url, { headers: this.getHeaders(token) });
       if (!res.ok) {
         if (res.status === 401) {
           authService.signOut();
@@ -131,7 +132,7 @@ export class DriveService {
       do {
         const pageParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
         const allUrl = `${DRIVE_API_URL}/files?q=${allQ}&fields=nextPageToken,files(id, name, parents)&pageSize=500${pageParam}`;
-        const allRes = await fetch(allUrl, { headers: this.getHeaders(token) });
+        const allRes = await fetchWithDriveBackoff(allUrl, { headers: this.getHeaders(token) });
         if (!allRes.ok) break;
 
         const allData = await allRes.json();
@@ -168,7 +169,7 @@ export class DriveService {
 
       // 3. Only if explicitly requested and definitely not found, create "mimusica"
       if (createIfNotFound) {
-        const createRes = await fetch(`${DRIVE_API_URL}/files`, {
+        const createRes = await fetchWithDriveBackoff(`${DRIVE_API_URL}/files`, {
           method: 'POST',
           headers: {
             ...this.getHeaders(token),
@@ -235,7 +236,7 @@ export class DriveService {
           const pageParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
           const url = `${DRIVE_API_URL}/files?q=${q}&fields=nextPageToken,files(id, name, parents)&pageSize=1000${pageParam}`;
 
-          const res = await fetch(url, { headers: this.getHeaders(token) });
+          const res = await fetchWithDriveBackoff(url, { headers: this.getHeaders(token) });
           if (!res.ok) break;
 
           const data = await res.json();
@@ -324,7 +325,7 @@ export class DriveService {
           const pageParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
           const url = `${DRIVE_API_URL}/files?q=${q}&fields=${fields}&pageSize=1000&orderBy=name${pageParam}`;
 
-          const res = await fetch(url, { headers: this.getHeaders(token) });
+          const res = await fetchWithDriveBackoff(url, { headers: this.getHeaders(token) });
           if (!res.ok) {
             if (res.status === 401) {
               authService.signOut();
@@ -442,7 +443,7 @@ export class DriveService {
     const url = `${DRIVE_API_URL}/files?q=${q}&fields=${fields}&pageSize=20&orderBy=name`;
 
     try {
-      const res = await fetch(url, { headers: this.getHeaders(token) });
+      const res = await fetchWithDriveBackoff(url, { headers: this.getHeaders(token) });
       if (!res.ok) return null;
 
       const data = await res.json();
@@ -462,7 +463,7 @@ export class DriveService {
 
         // Try downloading image as authenticated Blob for 100% reliable rendering without 403 errors
         try {
-          const blobRes = await fetch(`${DRIVE_API_URL}/files/${selectedImage.id}?alt=media`, {
+          const blobRes = await fetchWithDriveBackoff(`${DRIVE_API_URL}/files/${selectedImage.id}?alt=media`, {
             headers: this.getHeaders(token)
           });
           if (blobRes.ok) {
@@ -513,7 +514,7 @@ export class DriveService {
       do {
         const pageParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
         const url = `${DRIVE_API_URL}/files?q=${q}&fields=nextPageToken,files(id, name, parents)&pageSize=1000&orderBy=name${pageParam}`;
-        const res = await fetch(url, { headers: this.getHeaders(token) });
+        const res = await fetchWithDriveBackoff(url, { headers: this.getHeaders(token) });
         if (!res.ok) break;
 
         const data = await res.json();
@@ -581,7 +582,7 @@ export class DriveService {
     const mediaUrl = `${DRIVE_API_URL}/files/${driveFileId}?alt=media`;
 
     try {
-      const response = await fetch(mediaUrl, {
+      const response = await fetchWithDriveBackoff(mediaUrl, {
         headers: {
           Authorization: `Bearer ${token}`
         }
@@ -639,7 +640,7 @@ export class DriveService {
 
     try {
       const mediaUrl = `${DRIVE_API_URL}/files/${driveFileId}?alt=media`;
-      const response = await fetch(mediaUrl, {
+      const response = await fetchWithDriveBackoff(mediaUrl, {
         headers: {
           Authorization: `Bearer ${token}`
         }
@@ -718,7 +719,7 @@ export class DriveService {
     try {
       const listQ = encodeURIComponent("name = 'audiocar_playlists.json' and 'appDataFolder' in parents and trashed = false");
       const listUrl = `${DRIVE_API_URL}/files?q=${listQ}&spaces=appDataFolder&fields=files(id)`;
-      const listRes = await fetch(listUrl, { headers: this.getHeaders(token) });
+      const listRes = await fetchWithDriveBackoff(listUrl, { headers: this.getHeaders(token) });
       const listData = await listRes.json();
       const existingFile = listData.files?.[0];
 
@@ -726,7 +727,7 @@ export class DriveService {
 
       if (existingFile) {
         const updateUrl = `https://www.googleapis.com/upload/drive/v3/files/${existingFile.id}?uploadType=media`;
-        await fetch(updateUrl, {
+        await fetchWithDriveBackoff(updateUrl, {
           method: 'PATCH',
           headers: {
             Authorization: `Bearer ${token}`,
@@ -744,7 +745,7 @@ export class DriveService {
         form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
         form.append('file', blob);
 
-        await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        await fetchWithDriveBackoff('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${token}`
@@ -766,14 +767,14 @@ export class DriveService {
     try {
       const listQ = encodeURIComponent("name = 'audiocar_playlists.json' and 'appDataFolder' in parents and trashed = false");
       const listUrl = `${DRIVE_API_URL}/files?q=${listQ}&spaces=appDataFolder&fields=files(id)`;
-      const listRes = await fetch(listUrl, { headers: this.getHeaders(token) });
+      const listRes = await fetchWithDriveBackoff(listUrl, { headers: this.getHeaders(token) });
       const listData = await listRes.json();
       const existingFile = listData.files?.[0];
 
       if (!existingFile) return [];
 
       const downloadUrl = `${DRIVE_API_URL}/files/${existingFile.id}?alt=media`;
-      const dlRes = await fetch(downloadUrl, { headers: this.getHeaders(token) });
+      const dlRes = await fetchWithDriveBackoff(downloadUrl, { headers: this.getHeaders(token) });
       if (dlRes.ok) {
         return await dlRes.json();
       }

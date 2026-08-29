@@ -3,7 +3,7 @@
  */
 
 export type ImageFormat = 'JPG' | 'PNG' | 'GIF' | 'WEBP' | 'SVG' | 'OTHER';
-export type CloudProviderType = 'drive' | 'onedrive' | 'dropbox' | 'demo';
+export type CloudProviderType = 'drive' | 'demo';
 
 export interface AudioTrack {
   id: string;
@@ -22,7 +22,7 @@ export interface AudioTrack {
   cloudPath?: string;
   folderId?: string;
   folderPath?: string;
-  source: 'drive' | 'onedrive' | 'dropbox' | 'demo' | 'local';
+  source: 'drive' | 'demo' | 'local';
   bitrate?: string;
   year?: string;
   cachedBlobUrl?: string;

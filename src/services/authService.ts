@@ -13,8 +13,9 @@ import {
   signOut as firebaseSignOut,
   User 
 } from 'firebase/auth';
-import { DriveAuthUser } from '../types';
+import { AudioTrack, DriveAuthUser } from '../types';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { swService } from './swService';
 
 declare global {
   interface Window {
@@ -29,6 +30,7 @@ const CLIENT_ID_KEY = 'tesladrive_custom_client_id';
 const DEFAULT_CLIENT_ID = (firebaseConfig as any).oAuthClientId || '1094273500016-jj1hfi1cv2p7ihqsvakmprpevd38ldau.apps.googleusercontent.com';
 
 const SCOPES = [
+  'https://www.googleapis.com/auth/drive.file',
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/drive.appdata',
   'https://www.googleapis.com/auth/userinfo.profile',
@@ -258,6 +260,7 @@ class AuthService {
     }
     this.currentUser = null;
     localStorage.removeItem(AUTH_STORAGE_KEY);
+    swService.clearToken();
     this.notifyListeners();
   }
 
@@ -281,6 +284,9 @@ class AuthService {
 
   private notifyListeners() {
     const user = this.getUser();
+    if (user?.accessToken) {
+      swService.syncToken(user.accessToken);
+    }
     this.listeners.forEach((listener) => listener(user));
   }
 }

@@ -81,6 +81,7 @@ class AudioEngine {
   private isCrossfading = false;
   private crossfadeTimer: any = null;
   private silentCarrierStarted = false;
+  private mediaSessionSyncInterval: any = null;
 
   constructor() {
     this.audioA = new Audio();
@@ -338,7 +339,7 @@ class AudioEngine {
         this.state.isLoading = false;
         this.state.error = null;
         this.notifyListeners();
-        this.updateMediaSessionPosition();
+        this.startMediaSessionPositionSync();
         teslaKeepAlive.setupWakeLock();
         teslaKeepAlive.startSilentAudioCarrier();
         this.persistCurrentSessionState();
@@ -348,6 +349,7 @@ class AudioEngine {
     audioEl.addEventListener('pause', () => {
       if (this.activePlayerIndex === playerIndex && !this.isCrossfading) {
         this.state.isPlaying = false;
+        this.stopMediaSessionPositionSync();
         this.notifyListeners();
         this.updateMediaSessionPosition();
         this.persistCurrentSessionState();
@@ -458,14 +460,15 @@ class AudioEngine {
   private updateMediaSessionMetadata(track: AudioTrack) {
     if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
 
-    const artwork = track.thumbnailUrl
-      ? [
-          { src: track.thumbnailUrl, sizes: '96x96', type: 'image/jpeg' },
-          { src: track.thumbnailUrl, sizes: '128x128', type: 'image/jpeg' },
-          { src: track.thumbnailUrl, sizes: '256x256', type: 'image/jpeg' },
-          { src: track.thumbnailUrl, sizes: '512x512', type: 'image/jpeg' }
-        ]
-      : [{ src: '/icon-512.png', sizes: '512x512', type: 'image/png' }];
+    const baseArt = track.thumbnailUrl || '/audiocar-logo.svg';
+    const artwork = [
+      { src: baseArt, sizes: '96x96', type: 'image/jpeg' },
+      { src: baseArt, sizes: '128x128', type: 'image/jpeg' },
+      { src: baseArt, sizes: '192x192', type: 'image/jpeg' },
+      { src: baseArt, sizes: '256x256', type: 'image/jpeg' },
+      { src: baseArt, sizes: '384x384', type: 'image/jpeg' },
+      { src: baseArt, sizes: '512x512', type: 'image/jpeg' }
+    ];
 
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title || track.name,
@@ -475,6 +478,24 @@ class AudioEngine {
     });
 
     this.updateMediaSessionPosition();
+  }
+
+  private startMediaSessionPositionSync() {
+    this.stopMediaSessionPositionSync();
+    this.updateMediaSessionPosition();
+    // 300ms interval Keep-Alive to prevent mobile OS Garbage Collection / thread sleeping
+    this.mediaSessionSyncInterval = setInterval(() => {
+      if (this.state.isPlaying && !this.activeAudio.paused) {
+        this.updateMediaSessionPosition();
+      }
+    }, 300);
+  }
+
+  private stopMediaSessionPositionSync() {
+    if (this.mediaSessionSyncInterval) {
+      clearInterval(this.mediaSessionSyncInterval);
+      this.mediaSessionSyncInterval = null;
+    }
   }
 
   private updateMediaSessionPosition() {
@@ -488,8 +509,8 @@ class AudioEngine {
       try {
         navigator.mediaSession.setPositionState({
           duration: this.activeAudio.duration,
-          playbackRate: this.activeAudio.playbackRate,
-          position: Math.min(this.activeAudio.currentTime, this.activeAudio.duration)
+          playbackRate: this.activeAudio.playbackRate || 1.0,
+          position: Math.min(Math.max(0, this.activeAudio.currentTime), this.activeAudio.duration)
         });
       } catch (e) {
         // Suppress rapid seek sync warnings

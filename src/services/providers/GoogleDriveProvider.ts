@@ -59,6 +59,10 @@ export class GoogleDriveProvider implements CloudMusicProvider {
   public async getStreamUrl(track: AudioTrack): Promise<string> {
     const fileId = track.cloudFileId || track.driveFileId;
     if (fileId) {
+      // If Service Worker is active and controlling requests, use virtual CORS-free stream route
+      if (typeof window !== 'undefined' && 'serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        return `/stream/${fileId}`;
+      }
       return await driveService.getStreamBlobUrl(fileId, track.mimeType);
     }
     return track.streamUrl || '';
