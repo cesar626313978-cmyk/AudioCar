@@ -221,22 +221,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onSuccess }) => {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 self-end sm:self-center">
+                <div className="flex items-center gap-2 self-end sm:self-center flex-wrap">
                   {driveSession ? (
                     <div className="flex items-center gap-2">
                       <button
                         onClick={handleSyncNow}
                         disabled={isSyncing}
-                        className="hitbox-48 h-10 px-4 rounded-xl bg-white hover:bg-neutral-200 text-black font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
+                        className="hitbox-48 h-10 px-3.5 rounded-xl bg-white hover:bg-neutral-200 text-black font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
                         <span>Sincronizar</span>
                       </button>
                       <button
+                        onClick={handleConnectGoogle}
+                        disabled={loadingProvider === 'drive'}
+                        title="Cambiar a otra cuenta de Google/Gmail"
+                        className="hitbox-48 h-10 px-3.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 hover:text-white border border-neutral-700/80 font-bold text-xs uppercase tracking-wider transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      >
+                        <Cloud className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Cambiar cuenta</span>
+                      </button>
+                      <button
                         onClick={handleDisconnect}
                         disabled={loadingProvider === 'drive'}
                         title="Cerrar sesión de Google Drive"
-                        className="hitbox-48 h-10 px-3 rounded-xl bg-neutral-800 hover:bg-red-950/80 text-neutral-400 hover:text-red-300 border border-neutral-700/80 hover:border-red-800 transition-colors flex items-center justify-center cursor-pointer"
+                        className="hitbox-48 h-10 px-3 rounded-xl bg-neutral-800 hover:bg-red-950/80 text-neutral-400 hover:text-red-300 border border-neutral-700/80 hover:border-red-800 transition-colors flex items-center justify-center cursor-pointer disabled:opacity-50"
                       >
                         <LogOut className="w-4 h-4" />
                       </button>
@@ -252,7 +261,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onSuccess }) => {
                       ) : (
                         <>
                           <Cloud className="w-4 h-4" />
-                          <span>Conectar Google Drive</span>
+                          <span>Elegir cuenta de Google</span>
                         </>
                       )}
                     </button>

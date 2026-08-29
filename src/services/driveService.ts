@@ -53,6 +53,29 @@ export class DriveService {
     this.folderDetailsCache.clear();
   }
 
+  /**
+   * Checks whether the "/mimusica" root folder exists in the user's Drive without creating it.
+   */
+  public async checkMusicRootFolderStatus(): Promise<{ exists: boolean; folder?: DriveFolder; userEmail?: string }> {
+    const user = authService.getUser();
+    if (!user) {
+      return { exists: false };
+    }
+    const root = await this.getMusicRootFolder(false);
+    return {
+      exists: !!root,
+      folder: root || undefined,
+      userEmail: user.email
+    };
+  }
+
+  /**
+   * Explicitly creates the "/mimusica" root folder in Google Drive.
+   */
+  public async createMusicRootFolder(): Promise<DriveFolder | null> {
+    return await this.getMusicRootFolder(true);
+  }
+
   private getHeaders(tokenOverride?: string): HeadersInit {
     const token = tokenOverride || authService.getAccessToken();
     if (!token) {
@@ -611,25 +634,18 @@ export class DriveService {
   }
 
   /**
-   * Pre-fetches an upcoming track into RAM and IndexedDB cache in the background
-   * Runs non-blockingly so driving through dead zones / tunnels never pauses the music
+   * Pre-fetches an upcoming track into IndexedDB cache in the background
+   * Runs non-blockingly so driving through dead zones / tunnels never pauses the music.
+   * Does NOT hold open Blob URLs in RAM for dormant queued tracks, preventing Safari/In-Car OOM crashes.
    */
   async prefetchStream(driveFileId: string): Promise<boolean> {
     if (!driveFileId) return false;
-
-    // Already in RAM?
-    if (this.blobCache.has(driveFileId)) return true;
 
     // Already in IndexedDB?
     try {
       const hasInDb = await dbService.hasAudioBlob(driveFileId);
       if (hasInDb) {
-        const blob = await dbService.getAudioBlob(driveFileId);
-        if (blob) {
-          const pureAudioBlob = new Blob([blob], { type: 'audio/mpeg' });
-          this.cacheInMemory(driveFileId, URL.createObjectURL(pureAudioBlob));
-          return true;
-        }
+        return true;
       }
     } catch {
       // Continue to network fetch
@@ -650,9 +666,8 @@ export class DriveService {
 
       const rawBlob = await response.blob();
       const audioBlob = new Blob([rawBlob], { type: 'audio/mpeg' });
-      const blobUrl = URL.createObjectURL(audioBlob);
 
-      this.cacheInMemory(driveFileId, blobUrl);
+      // Persist binary directly in IndexedDB without holding open Blob URLs in RAM
       await dbService.saveAudioBlob(driveFileId, audioBlob);
       return true;
     } catch (e) {
@@ -661,16 +676,58 @@ export class DriveService {
     }
   }
 
+  /**
+   * Caches active Blob URLs in RAM (capped strictly at max 2 items to prevent WebKit/Car RAM overflow)
+   */
   private cacheInMemory(id: string, url: string) {
-    if (this.blobCache.size > 20) {
+    if (this.blobCache.has(id)) {
+      const existing = this.blobCache.get(id);
+      if (existing && existing !== url) {
+        URL.revokeObjectURL(existing);
+      }
+    }
+
+    // Strictly limit active RAM Blob URLs to max 2 (playing track + next pre-warmed track)
+    while (this.blobCache.size >= 2) {
       const oldestKey = this.blobCache.keys().next().value;
       if (oldestKey) {
         const oldUrl = this.blobCache.get(oldestKey);
-        if (oldUrl) URL.revokeObjectURL(oldUrl);
+        if (oldUrl) {
+          try {
+            URL.revokeObjectURL(oldUrl);
+          } catch {}
+        }
         this.blobCache.delete(oldestKey);
+      } else {
+        break;
       }
     }
     this.blobCache.set(id, url);
+  }
+
+  /**
+   * Explicitly evicts and revokes all Blob URLs except for specified active IDs (e.g. current track & next track)
+   */
+  public evictOldBlobsExcept(keepIds: string[]) {
+    const keepSet = new Set(keepIds.filter(Boolean));
+    for (const [id, url] of this.blobCache.entries()) {
+      if (!keepSet.has(id)) {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {}
+        this.blobCache.delete(id);
+      }
+    }
+  }
+
+  public revokeBlob(id: string) {
+    const url = this.blobCache.get(id);
+    if (url) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {}
+      this.blobCache.delete(id);
+    }
   }
 
   public isStreamCached(driveFileId: string): boolean {

@@ -10,11 +10,12 @@
  * - navigator.mediaSession handlers (Steering wheel controls & Car HUD metadata with Album Art)
  */
 
-import { AudioTrack, PlayerState, RepeatMode, PlaybackMode, PlaybackScope, ImageFormat } from '../types';
+import { AudioTrack, PlayerState, RepeatMode, PlaybackMode, PlaybackScope, ImageFormat, UserPreferences } from '../types';
 import { dbService } from './dbService';
 import { driveService } from './driveService';
 import { cloudService } from './cloudService';
 import { teslaKeepAlive } from './teslaKeepAliveService';
+import { preferencesService } from './preferencesService';
 
 type StateListener = (state: PlayerState) => void;
 
@@ -82,6 +83,8 @@ class AudioEngine {
   private crossfadeTimer: any = null;
   private silentCarrierStarted = false;
   private mediaSessionSyncInterval: any = null;
+  private lazyPrefetchTimer: any = null;
+  private hasTriggeredLazyPrefetch = false;
 
   constructor() {
     this.audioA = new Audio();
@@ -204,44 +207,62 @@ class AudioEngine {
     return this.activePlayerIndex === 0 ? this.gainNodeB : this.gainNodeA;
   }
 
-  private async restoreSavedSettings() {
+  public async restoreSavedSettings(userEmail?: string) {
     try {
-      const savedVolume = await dbService.getSetting<number>('player_volume', 0.85);
-      const savedMode = await dbService.getSetting<PlaybackMode>('player_mode', 'linear');
-      const savedScope = await dbService.getSetting<PlaybackScope>('player_scope', 'all_folders');
-      const savedSpeed = await dbService.getSetting<number>('player_speed', 1.0);
-      const savedEq = await dbService.getSetting<string>('player_eq', 'Balanced');
-      const savedCrossfade = await dbService.getSetting<boolean>('player_crossfade', false);
-      const savedCrossfadeDur = await dbService.getSetting<number>('player_crossfade_dur', 4);
-      const savedFadeInOut = await dbService.getSetting<boolean>('player_fade_in_out', true);
-      const savedFadeDur = await dbService.getSetting<number>('player_fade_dur', 3);
-      const savedNormEnabled = await dbService.getSetting<boolean>('player_norm_enabled', true);
-      const savedNormPreset = await dbService.getSetting<'balanced' | 'dynamic' | 'night'>('player_norm_preset', 'balanced');
-      const savedBufferCount = await dbService.getSetting<number>('player_buffer_ahead', 3);
-
-      this.state.volume = savedVolume;
-      this.state.playbackMode = savedMode;
-      this.state.playbackScope = savedScope;
-      this.state.isShuffle = savedMode === 'shuffle';
-      this.state.repeatMode = savedMode === 'continuous' ? 'all' : savedMode === 'repeat_one' ? 'one' : 'off';
-      this.state.playbackRate = savedSpeed;
-      this.state.eqPreset = savedEq;
-      this.state.isCrossfadeEnabled = savedCrossfade;
-      this.state.crossfadeDuration = savedCrossfadeDur;
-      this.state.isFadeInOutEnabled = savedFadeInOut;
-      this.state.fadeInOutDuration = savedFadeDur;
-      this.state.isNormalizationEnabled = savedNormEnabled;
-      this.state.normalizationPreset = savedNormPreset;
-      this.state.bufferAheadCount = savedBufferCount;
-
-      this.audioA.volume = savedVolume;
-      this.audioB.volume = savedVolume;
-      this.audioA.playbackRate = savedSpeed;
-      this.audioB.playbackRate = savedSpeed;
-      this.notifyListeners();
+      preferencesService.setApplying(true);
+      const prefs = await preferencesService.loadPreferencesForUser(userEmail);
+      this.applyPreferencesProfile(prefs);
     } catch (e) {
-      console.warn('Could not restore audio settings:', e);
+      console.warn('Could not restore user audio settings:', e);
+    } finally {
+      preferencesService.setApplying(false);
     }
+  }
+
+  /**
+   * Directly applies a complete user preferences profile to the engine
+   */
+  public applyPreferencesProfile(prefs: Partial<UserPreferences>) {
+    const vol = typeof prefs.volume === 'number' ? prefs.volume : 0.85;
+    const mode = prefs.playbackMode || 'linear';
+    const scope = prefs.playbackScope || 'all_folders';
+    const speed = typeof prefs.playbackRate === 'number' ? prefs.playbackRate : 1.0;
+    const eq = prefs.eqPreset || 'Balanced';
+    const crossfade = typeof prefs.isCrossfadeEnabled === 'boolean' ? prefs.isCrossfadeEnabled : false;
+    const crossfadeDur = typeof prefs.crossfadeDuration === 'number' ? prefs.crossfadeDuration : 4;
+    const fadeInOut = typeof prefs.isFadeInOutEnabled === 'boolean' ? prefs.isFadeInOutEnabled : true;
+    const fadeDur = typeof prefs.fadeInOutDuration === 'number' ? prefs.fadeInOutDuration : 3;
+    const normEnabled = typeof prefs.isNormalizationEnabled === 'boolean' ? prefs.isNormalizationEnabled : true;
+    const normPreset = prefs.normalizationPreset || 'balanced';
+    const bufferCount = typeof prefs.bufferAheadCount === 'number' ? prefs.bufferAheadCount : 3;
+
+    this.state.volume = vol;
+    this.state.playbackMode = mode;
+    this.state.playbackScope = scope;
+    this.state.isShuffle = mode === 'shuffle';
+    this.state.repeatMode = mode === 'continuous' ? 'all' : mode === 'repeat_one' ? 'one' : 'off';
+    this.state.playbackRate = speed;
+    this.state.eqPreset = eq;
+    this.state.isCrossfadeEnabled = crossfade;
+    this.state.crossfadeDuration = crossfadeDur;
+    this.state.isFadeInOutEnabled = fadeInOut;
+    this.state.fadeInOutDuration = fadeDur;
+    this.state.isNormalizationEnabled = normEnabled;
+    this.state.normalizationPreset = normPreset;
+    this.state.bufferAheadCount = bufferCount;
+
+    this.audioA.volume = vol;
+    this.audioB.volume = vol;
+    this.audioA.playbackRate = speed;
+    this.audioB.playbackRate = speed;
+
+    if (this.masterGain && this.audioContext) {
+      this.masterGain.gain.setValueAtTime(this.state.isMuted ? 0 : vol, this.audioContext.currentTime);
+    }
+
+    this.applyEQPreset(eq);
+    this.applyNormalizationSettings();
+    this.notifyListeners();
   }
 
   private initWebAudio() {
@@ -361,6 +382,16 @@ class AudioEngine {
         this.state.currentTime = audioEl.currentTime;
         if (audioEl.buffered.length > 0) {
           this.state.bufferedEnd = audioEl.buffered.end(audioEl.buffered.length - 1);
+        }
+
+        // Lazy Buffering Guard: Start prefetching only after user has listened for >= 10s or 25% of track
+        // Prevents rapid skipping from burning 4G/5G mobile cellular data
+        if (
+          !this.hasTriggeredLazyPrefetch &&
+          (audioEl.currentTime >= 10 || (audioEl.duration > 0 && audioEl.currentTime >= audioEl.duration * 0.25))
+        ) {
+          this.hasTriggeredLazyPrefetch = true;
+          this.prefetchUpcomingTracks().catch(() => {});
         }
 
         // Check for Crossfade trigger
@@ -531,6 +562,7 @@ class AudioEngine {
   public async setPlaybackScope(scope: PlaybackScope, allTracks?: AudioTrack[]) {
     this.state.playbackScope = scope;
     await dbService.setSetting('player_scope', scope);
+    preferencesService.updateCurrentPreference('playbackScope', scope);
 
     const libraryTracks = (allTracks && allTracks.length > 0)
       ? allTracks
@@ -670,8 +702,15 @@ class AudioEngine {
       await currentAudio.play();
       await dbService.logTrackPlayed(track.id);
       
-      // Trigger background Mega-Buffer for upcoming tracks
-      this.prefetchUpcomingTracks().catch(() => {});
+      // Strict RAM Management: Evict all dormant Blob URLs except current and immediate next track
+      const nextTrackIdx = this.getNextTrackIndex();
+      const nextTrack = nextTrackIdx !== null ? this.state.queue[nextTrackIdx] : null;
+      const currentFileId = track.cloudFileId || track.driveFileId || '';
+      const nextFileId = nextTrack?.cloudFileId || nextTrack?.driveFileId || '';
+      driveService.evictOldBlobsExcept([currentFileId, nextFileId]);
+
+      // Lazy Buffering: Delay background cellular prefetching until user listens for 10s or 25% of track
+      this.scheduleLazyPrefetch();
     } catch (err: any) {
       console.error('playCurrentTrack error:', err);
       this.state.isLoading = false;
@@ -740,7 +779,16 @@ class AudioEngine {
       this.updateMediaSessionMetadata(targetTrack);
       this.notifyListeners();
       await dbService.logTrackPlayed(targetTrack.id);
-      this.prefetchUpcomingTracks().catch(() => {});
+
+      // Strict RAM Management: Evict all dormant Blob URLs except current and immediate next track
+      const nextUpcomingIdx = this.getNextTrackIndex();
+      const nextUpcomingTrack = nextUpcomingIdx !== null ? this.state.queue[nextUpcomingIdx] : null;
+      const currentFileId = targetTrack.cloudFileId || targetTrack.driveFileId || '';
+      const nextFileId = nextUpcomingTrack?.cloudFileId || nextUpcomingTrack?.driveFileId || '';
+      driveService.evictOldBlobsExcept([currentFileId, nextFileId]);
+
+      // Lazy Buffering: Delay background cellular prefetching until user listens for 10s or 25% of track
+      this.scheduleLazyPrefetch();
 
       if (this.crossfadeTimer) clearTimeout(this.crossfadeTimer);
       this.crossfadeTimer = setTimeout(() => {
@@ -910,6 +958,7 @@ class AudioEngine {
 
     this.notifyListeners();
     dbService.setSetting('player_volume', clamped);
+    preferencesService.updateCurrentPreference('volume', clamped);
   }
 
   public toggleMute() {
@@ -931,6 +980,7 @@ class AudioEngine {
     this.notifyListeners();
     this.updateMediaSessionPosition();
     dbService.setSetting('player_speed', rate);
+    preferencesService.updateCurrentPreference('playbackRate', rate);
   }
 
   /**
@@ -964,6 +1014,7 @@ class AudioEngine {
 
     this.notifyListeners();
     dbService.setSetting('player_mode', mode);
+    preferencesService.updateCurrentPreference('playbackMode', mode);
   }
 
   public cyclePlaybackMode() {
@@ -1000,8 +1051,10 @@ class AudioEngine {
     }
     this.notifyListeners();
     dbService.setSetting('player_crossfade', enabled);
+    preferencesService.updateCurrentPreference('isCrossfadeEnabled', enabled);
     if (durationSeconds !== undefined) {
       dbService.setSetting('player_crossfade_dur', this.state.crossfadeDuration);
+      preferencesService.updateCurrentPreference('crossfadeDuration', this.state.crossfadeDuration);
     }
   }
 
@@ -1015,8 +1068,10 @@ class AudioEngine {
     }
     this.notifyListeners();
     dbService.setSetting('player_fade_in_out', enabled);
+    preferencesService.updateCurrentPreference('isFadeInOutEnabled', enabled);
     if (durationSeconds !== undefined) {
       dbService.setSetting('player_fade_dur', this.state.fadeInOutDuration);
+      preferencesService.updateCurrentPreference('fadeInOutDuration', this.state.fadeInOutDuration);
     }
   }
 
@@ -1024,6 +1079,7 @@ class AudioEngine {
     this.state.eqPreset = presetName;
     this.notifyListeners();
     dbService.setSetting('player_eq', presetName);
+    preferencesService.updateCurrentPreference('eqPreset', presetName);
 
     if (!this.bassFilter || !this.midFilter || !this.trebleFilter) return;
 
@@ -1069,8 +1125,10 @@ class AudioEngine {
     this.applyNormalizationSettings();
     this.notifyListeners();
     dbService.setSetting('player_norm_enabled', enabled);
+    preferencesService.updateCurrentPreference('isNormalizationEnabled', enabled);
     if (preset) {
       dbService.setSetting('player_norm_preset', preset);
+      preferencesService.updateCurrentPreference('normalizationPreset', preset);
     }
   }
 
@@ -1136,6 +1194,7 @@ class AudioEngine {
     this.state.bufferAheadCount = Math.max(1, Math.min(count, 5));
     this.notifyListeners();
     await dbService.setSetting('player_buffer_ahead', this.state.bufferAheadCount);
+    preferencesService.updateCurrentPreference('bufferAheadCount', this.state.bufferAheadCount);
     this.prefetchUpcomingTracks().catch(() => {});
   }
 
@@ -1174,6 +1233,42 @@ class AudioEngine {
     this.state.preloadedTrackIds = loadedIds;
     this.state.isPreloading = false;
     this.notifyListeners();
+
+    // Hardware Gapless Pre-Priming: Pre-warm the inactive audio element with the immediate next track's URL
+    // so hardware audio codecs and decoders are ready in RAM without startup latency stutter
+    if (this.state.queue.length > 0 && !this.isCrossfading) {
+      const nextIdx = this.getNextTrackIndex();
+      if (nextIdx !== null && nextIdx !== this.state.currentTrackIndex) {
+        const nextTrack = this.state.queue[nextIdx];
+        if (nextTrack) {
+          this.getTrackStreamUrl(nextTrack).then((nextUrl) => {
+            if (nextUrl && !this.isCrossfading) {
+              const inactiveAudio = this.activePlayerIndex === 0 ? this.audioB : this.audioA;
+              if (inactiveAudio.src !== nextUrl) {
+                inactiveAudio.src = nextUrl;
+                inactiveAudio.preload = 'auto';
+                inactiveAudio.load();
+              }
+            }
+          }).catch(() => {});
+        }
+      }
+    }
+  }
+
+  private scheduleLazyPrefetch() {
+    if (this.lazyPrefetchTimer) {
+      clearTimeout(this.lazyPrefetchTimer);
+    }
+    this.hasTriggeredLazyPrefetch = false;
+
+    // Wait 10 seconds of continuous listening before triggering mobile cellular prefetching
+    this.lazyPrefetchTimer = setTimeout(() => {
+      if (this.state.isPlaying && !this.hasTriggeredLazyPrefetch) {
+        this.hasTriggeredLazyPrefetch = true;
+        this.prefetchUpcomingTracks().catch(() => {});
+      }
+    }, 10000);
   }
 
   public async clearBufferCache() {

@@ -8,8 +8,23 @@ import { AudioTrack, DriveFolder, CloudMusicProvider, CloudProviderType, CloudUs
 import { googleDriveProvider } from './providers/GoogleDriveProvider';
 import { demoProvider } from './providers/DemoProvider';
 import { dbService } from './dbService';
+import { driveService } from './driveService';
+import { authService } from './authService';
 
 const ACTIVE_PROVIDER_KEY = 'audiocar_active_cloud_provider';
+
+export interface CloudSyncResult {
+  status: 'not_authenticated' | 'root_folder_not_found' | 'synced' | 'error';
+  success: boolean;
+  rootFolderFound: boolean;
+  rootFolderName?: string;
+  userEmail?: string;
+  tracksCount: number;
+  foldersCount: number;
+  tracks: AudioTrack[];
+  folders: DriveFolder[];
+  errorMessage?: string;
+}
 
 type CloudListener = (activeProvider: CloudMusicProvider) => void;
 
@@ -65,12 +80,83 @@ class CloudService {
   }
 
   public async syncLibrary(targetProviderId?: CloudProviderType): Promise<{ tracks: AudioTrack[]; folders: DriveFolder[] }> {
+    const res = await this.syncLibraryDetailed(targetProviderId);
+    return { tracks: res.tracks, folders: res.folders };
+  }
+
+  public async syncLibraryDetailed(targetProviderId?: CloudProviderType): Promise<CloudSyncResult> {
     const provider = targetProviderId ? this.getProvider(targetProviderId) : this.getActiveProvider();
     
-    if (!provider.isConfigured() && provider.providerId !== 'demo') {
-      return { tracks: [], folders: [] };
+    // Check if Google Drive is active but user is not logged in
+    if (provider.providerId === 'drive') {
+      const user = authService.getUser();
+      if (!user) {
+        return {
+          status: 'not_authenticated',
+          success: false,
+          rootFolderFound: false,
+          tracksCount: 0,
+          foldersCount: 0,
+          tracks: [],
+          folders: []
+        };
+      }
+
+      // Check if root folder "/mimusica" exists
+      const rootFolder = await driveService.getMusicRootFolder(false);
+      if (!rootFolder) {
+        return {
+          status: 'root_folder_not_found',
+          success: false,
+          rootFolderFound: false,
+          userEmail: user.email,
+          tracksCount: 0,
+          foldersCount: 0,
+          tracks: [],
+          folders: []
+        };
+      }
+
+      try {
+        const [tracks, folders] = await Promise.all([
+          provider.listTracks(),
+          provider.listFolders()
+        ]);
+
+        if (tracks.length > 0) {
+          await dbService.saveTracks(tracks).catch(() => {});
+        }
+        if (folders.length > 0) {
+          await dbService.saveFolders(folders).catch(() => {});
+        }
+
+        return {
+          status: 'synced',
+          success: true,
+          rootFolderFound: true,
+          rootFolderName: rootFolder.name,
+          userEmail: user.email,
+          tracksCount: tracks.length,
+          foldersCount: folders.length,
+          tracks,
+          folders
+        };
+      } catch (err: any) {
+        return {
+          status: 'error',
+          success: false,
+          rootFolderFound: true,
+          userEmail: user.email,
+          tracksCount: 0,
+          foldersCount: 0,
+          tracks: [],
+          folders: [],
+          errorMessage: err?.message || 'Error de sincronización con Google Drive.'
+        };
+      }
     }
 
+    // Fallback for demo or other providers
     const [tracks, folders] = await Promise.all([
       provider.listTracks(),
       provider.listFolders()
@@ -83,7 +169,15 @@ class CloudService {
       await dbService.saveFolders(folders).catch(() => {});
     }
 
-    return { tracks, folders };
+    return {
+      status: 'synced',
+      success: true,
+      rootFolderFound: true,
+      tracksCount: tracks.length,
+      foldersCount: folders.length,
+      tracks,
+      folders
+    };
   }
 
   /**

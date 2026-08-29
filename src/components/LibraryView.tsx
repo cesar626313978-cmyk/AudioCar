@@ -13,6 +13,7 @@ import React, { useState, useMemo } from 'react';
 import { AudioTrack, DriveFolder } from '../types';
 import { audioEngine } from '../services/audioEngine';
 import { dbService } from '../services/dbService';
+import { authService } from '../services/authService';
 import { AlbumArtwork } from './AlbumArtwork';
 import { FolderCard } from './FolderCard';
 import {
@@ -243,17 +244,26 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {folders.length === 0 ? (
-              <div className="col-span-full py-16 text-center bg-[#0a0a0a] rounded-3xl border border-neutral-800 p-8 space-y-3">
+              <div className="col-span-full py-16 text-center bg-[#0a0a0a] rounded-3xl border border-neutral-800 p-8 space-y-4">
                 <Folder className="w-16 h-16 text-neutral-600 mx-auto" />
-                <p className="text-white font-bold text-lg">No hay subcarpetas dentro de "mimusica"</p>
-                <p className="text-xs text-neutral-400 max-w-md mx-auto">
-                  Crea subcarpetas como <code>mimusica/40_Clasic</code>, <code>mimusica/Happy_music</code> o <code>mimusica/Dance Hits 90</code> en Google Drive y pulsa "Sincronizar Drive".
-                </p>
+                <div>
+                  <p className="text-white font-bold text-lg">
+                    {authService.getUser()
+                      ? 'No hay subcarpetas dentro de "mimusica"'
+                      : 'Google Drive no conectado'}
+                  </p>
+                  <p className="text-xs text-neutral-400 max-w-md mx-auto mt-1">
+                    {authService.getUser()
+                      ? 'Crea subcarpetas como mimusica/40_Clasic, mimusica/Happy_music o mimusica/Dance Hits 90 en Google Drive y pulsa "Sincronizar Drive".'
+                      : 'Inicia sesión con tu cuenta de Google Drive para cargar tus carpetas y álbumes desde la carpeta /mimusica.'}
+                  </p>
+                </div>
                 <button
                   onClick={() => onRefreshDrive()}
-                  className="mt-4 hitbox-48 px-5 py-2 rounded-full bg-white text-black font-bold text-xs uppercase tracking-wider hover:bg-neutral-200 transition-colors"
+                  className="mt-2 hitbox-48 px-6 py-2.5 rounded-full bg-white text-black font-bold text-xs uppercase tracking-wider hover:bg-neutral-200 transition-colors shadow-lg cursor-pointer inline-flex items-center gap-2"
                 >
-                  Sincronizar Ahora
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                  <span>{authService.getUser() ? 'Sincronizar Ahora' : 'Conectar y Sincronizar'}</span>
                 </button>
               </div>
             ) : (

@@ -274,27 +274,96 @@ class IndexedDBService {
     });
   }
 
-  // --- Mega-Buffer Audio Blobs Persistence (Anti-Radio Switching / 4G Outages) ---
+  // --- Mega-Buffer Audio Blobs Persistence (Anti-Radio Switching / 4G Outages & Quota Defense) ---
   async saveAudioBlob(id: string, blob: Blob): Promise<void> {
     const db = await this.getDB();
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve) => {
       try {
+        if (!db.objectStoreNames.contains('audioBlobs')) {
+          resolve();
+          return;
+        }
+
+        const tryWrite = (): Promise<boolean> => {
+          return new Promise((resWrite) => {
+            try {
+              const tx = db.transaction('audioBlobs', 'readwrite');
+              const store = tx.objectStore('audioBlobs');
+              store.put({
+                id,
+                blob,
+                size: blob.size,
+                type: blob.type,
+                timestamp: Date.now()
+              });
+              tx.oncomplete = () => resWrite(true);
+              tx.onerror = async (ev) => {
+                const err = tx.error || (ev.target as any)?.error;
+                console.warn('Could not save audio blob to IndexedDB (possible QuotaExceededError):', err?.name || err);
+                resWrite(false);
+              };
+            } catch (err) {
+              resWrite(false);
+            }
+          });
+        };
+
+        const success = await tryWrite();
+        if (!success) {
+          // If write failed (e.g. Safari iOS QuotaExceededError), evict the oldest 3 cached audio blobs and retry once
+          console.log('[IndexedDB Quota Defense] Attempting LRU eviction of oldest audio blobs...');
+          await this.evictOldestBlobs(3);
+          const retryOk = await tryWrite();
+          if (!retryOk) {
+            console.warn('[IndexedDB Quota Defense] Storage limit reached on device; operating in transient RAM mode.');
+          }
+        }
+        resolve();
+      } catch (err) {
+        console.warn('saveAudioBlob defensive fallback:', err);
+        resolve(); // Graceful non-blocking degradation
+      }
+    });
+  }
+
+  /**
+   * LRU Eviction: Removes the oldest N audio blobs from IndexedDB cache to prevent QuotaExceededError
+   */
+  async evictOldestBlobs(countToEvict: number = 3): Promise<void> {
+    const db = await this.getDB();
+    return new Promise((resolve) => {
+      try {
+        if (!db.objectStoreNames.contains('audioBlobs')) {
+          resolve();
+          return;
+        }
         const tx = db.transaction('audioBlobs', 'readwrite');
         const store = tx.objectStore('audioBlobs');
-        store.put({
-          id,
-          blob,
-          size: blob.size,
-          type: blob.type,
-          timestamp: Date.now()
-        });
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => {
-          console.warn('Could not save audio blob to IndexedDB:', tx.error);
-          resolve(); // Non-blocking
+        const request = store.getAll();
+
+        request.onsuccess = () => {
+          const items: any[] = request.result || [];
+          if (items.length <= 1) {
+            resolve();
+            return;
+          }
+
+          // Sort by timestamp ascending (oldest first)
+          items.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+          const toDelete = items.slice(0, countToEvict);
+
+          toDelete.forEach((item) => {
+            try {
+              store.delete(item.id);
+            } catch {}
+          });
+
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => resolve();
         };
-      } catch (err) {
-        console.warn('saveAudioBlob error:', err);
+
+        request.onerror = () => resolve();
+      } catch {
         resolve();
       }
     });

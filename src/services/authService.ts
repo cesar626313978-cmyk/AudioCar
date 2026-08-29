@@ -41,13 +41,6 @@ const SCOPES = [
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 const auth = getAuth(app);
 
-// Setup Google Auth Provider with all required Google Drive & profile scopes
-const googleProvider = new GoogleAuthProvider();
-SCOPES.forEach((scope) => googleProvider.addScope(scope));
-googleProvider.setCustomParameters({
-  prompt: 'select_account'
-});
-
 type AuthListener = (user: DriveAuthUser | null) => void;
 
 class AuthService {
@@ -55,6 +48,8 @@ class AuthService {
   private tokenClient: any = null;
   private listeners: Set<AuthListener> = new Set();
   private isSigningIn = false;
+  private pendingAuthResolve: ((user: DriveAuthUser) => void) | null = null;
+  private pendingAuthReject: ((err: any) => void) | null = null;
 
   constructor() {
     this.loadPersistedSession();
@@ -109,8 +104,10 @@ class AuthService {
   }
 
   /**
-   * Primary Sign-In Method: Firebase Auth Popup with Google Provider
-   * Seamlessly resolves tokens and profile.
+   * Primary Sign-In Method:
+   * 1. Uses Google Identity Services (GIS) with prompt: 'select_account' to ALWAYS
+   *    prompt the user to choose which Gmail/Google account they want to use.
+   * 2. Falls back to Firebase Auth with explicit prompt: 'select_account'.
    */
   public async requestSignIn(): Promise<DriveAuthUser> {
     if (this.isSigningIn) {
@@ -120,54 +117,75 @@ class AuthService {
     this.isSigningIn = true;
 
     try {
-      // 1. Try Firebase Auth popup
-      const result = await signInWithPopup(auth, googleProvider);
-      const credential = GoogleAuthProvider.credentialFromResult(result);
-      
-      const accessToken = credential?.accessToken;
-      if (!accessToken) {
-        throw new Error('No se recibió el token de acceso OAuth desde Google.');
+      // 1. Prioritize Google Identity Services (GIS) Token Client
+      if (typeof window !== 'undefined' && window.google?.accounts?.oauth2) {
+        return await new Promise<DriveAuthUser>((resolve, reject) => {
+          this.pendingAuthResolve = resolve;
+          this.pendingAuthReject = reject;
+
+          const initialized = this.initTokenClient();
+          if (initialized && this.tokenClient) {
+            try {
+              // 'select_account' forces Google to show the account picker every time
+              this.tokenClient.requestAccessToken({ prompt: 'select_account' });
+              return;
+            } catch (gisErr) {
+              console.warn('GIS requestAccessToken error, trying Firebase...', gisErr);
+            }
+          }
+
+          // Fallback to Firebase if GIS fails to start
+          this.signInWithFirebaseAuth()
+            .then((user) => {
+              this.pendingAuthResolve = null;
+              this.pendingAuthReject = null;
+              resolve(user);
+            })
+            .catch((err) => {
+              this.pendingAuthResolve = null;
+              this.pendingAuthReject = null;
+              reject(err);
+            });
+        });
       }
 
-      const user: DriveAuthUser = {
-        accessToken,
-        expiresAt: Date.now() + 3600 * 1000 - 60000,
-        email: result.user.email || 'usuario@google.com',
-        name: result.user.displayName || 'Conductor AudioCar',
-        picture: result.user.photoURL || ''
-      };
-
-      this.currentUser = user;
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
-      this.notifyListeners();
-      return user;
-    } catch (firebaseErr: any) {
-      console.warn('Firebase Popup error, attempting Google Identity Services fallback...', firebaseErr);
-
-      // 2. Fallback to GIS Token Client if available
-      return new Promise<DriveAuthUser>((resolve, reject) => {
-        const initialized = this.initTokenClient((user) => {
-          this.isSigningIn = false;
-          resolve(user);
-        });
-
-        if (!initialized || !this.tokenClient) {
-          this.isSigningIn = false;
-          const msg = firebaseErr.message || 'Error al conectar con Google.';
-          reject(new Error(msg));
-          return;
-        }
-
-        try {
-          this.tokenClient.requestAccessToken({ prompt: 'consent' });
-        } catch (err: any) {
-          this.isSigningIn = false;
-          reject(err);
-        }
-      });
+      // 2. Fallback to Firebase Auth popup with prompt: 'select_account'
+      return await this.signInWithFirebaseAuth();
     } finally {
       this.isSigningIn = false;
     }
+  }
+
+  /**
+   * Firebase Auth sign-in with Google Provider and explicit prompt: 'select_account'
+   */
+  private async signInWithFirebaseAuth(): Promise<DriveAuthUser> {
+    const provider = new GoogleAuthProvider();
+    SCOPES.forEach((scope) => provider.addScope(scope));
+    provider.setCustomParameters({
+      prompt: 'select_account'
+    });
+
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    
+    const accessToken = credential?.accessToken;
+    if (!accessToken) {
+      throw new Error('No se recibió el token de acceso OAuth desde Google.');
+    }
+
+    const user: DriveAuthUser = {
+      accessToken,
+      expiresAt: Date.now() + 3600 * 1000 - 60000,
+      email: result.user.email || 'usuario@google.com',
+      name: result.user.displayName || 'Conductor AudioCar',
+      picture: result.user.photoURL || ''
+    };
+
+    this.currentUser = user;
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+    this.notifyListeners();
+    return user;
   }
 
   public initTokenClient(callback?: (user: DriveAuthUser) => void): boolean {
@@ -181,7 +199,18 @@ class AuthService {
       this.tokenClient = window.google.accounts.oauth2.initTokenClient({
         client_id: clientId,
         scope: SCOPES.join(' '),
+        prompt: 'select_account',
         callback: async (tokenResponse: any) => {
+          if (tokenResponse?.error) {
+            console.error('GIS Error callback:', tokenResponse.error);
+            if (this.pendingAuthReject) {
+              this.pendingAuthReject(new Error(tokenResponse.error_description || tokenResponse.error));
+              this.pendingAuthReject = null;
+              this.pendingAuthResolve = null;
+            }
+            return;
+          }
+
           if (tokenResponse && tokenResponse.access_token) {
             const expiresInSec = tokenResponse.expires_in || 3600;
             const expiresAt = Date.now() + expiresInSec * 1000 - 60000;
@@ -199,11 +228,23 @@ class AuthService {
             this.currentUser = user;
             localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
             this.notifyListeners();
+
+            if (this.pendingAuthResolve) {
+              this.pendingAuthResolve(user);
+              this.pendingAuthResolve = null;
+              this.pendingAuthReject = null;
+            }
+
             if (callback) callback(user);
           }
         },
         error_callback: (err: any) => {
           console.error('Google Auth Error:', err);
+          if (this.pendingAuthReject) {
+            this.pendingAuthReject(new Error(err?.message || err?.error || 'Error al conectar con Google'));
+            this.pendingAuthReject = null;
+            this.pendingAuthResolve = null;
+          }
         }
       });
       return true;

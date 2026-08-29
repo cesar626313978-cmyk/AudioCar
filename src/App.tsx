@@ -10,6 +10,8 @@ import { audioEngine } from './services/audioEngine';
 import { authService } from './services/authService';
 import { cloudService } from './services/cloudService';
 import { dbService } from './services/dbService';
+import { teslaKeepAlive } from './services/teslaKeepAliveService';
+import { preferencesService } from './services/preferencesService';
 import { DEMO_TRACKS } from './data/demoTracks';
 
 // Components
@@ -21,6 +23,7 @@ import { AudioSettingsModal } from './components/AudioSettingsModal';
 import { DonationModal } from './components/DonationModal';
 import { ContactModal } from './components/ContactModal';
 import { HelpModal } from './components/HelpModal';
+import { SyncNoticeModal, SyncNoticeType } from './components/SyncNoticeModal';
 
 export type ActiveOverlay = 'none' | 'library' | 'settings' | 'auth' | 'donation' | 'contact' | 'help';
 
@@ -31,6 +34,16 @@ export function App() {
   const [folders, setFolders] = useState<DriveFolder[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [activeOverlay, setActiveOverlay] = useState<ActiveOverlay>('none');
+  const [syncNotice, setSyncNotice] = useState<{
+    isOpen: boolean;
+    type: SyncNoticeType;
+    userEmail?: string;
+    foldersCount?: number;
+    tracksCount?: number;
+  }>({
+    isOpen: false,
+    type: 'not_connected'
+  });
   
   // Theme state (Dark mode by default, persisted locally)
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -42,6 +55,7 @@ export function App() {
     setTheme((prev) => {
       const next = prev === 'dark' ? 'light' : 'dark';
       localStorage.setItem('audiocar_theme', next);
+      preferencesService.updateCurrentPreference('theme', next);
       return next;
     });
   };
@@ -69,11 +83,28 @@ export function App() {
       }
     });
 
-    // 3. Subscribe to Auth changes
-    const unsubscribeAuth = authService.subscribe((authUser) => {
+    // 3. Subscribe to Auth changes and apply User Preferences
+    const unsubscribeAuth = authService.subscribe(async (authUser) => {
+      const activeEmail = authUser?.email || 'default';
+      
+      // Load and apply this specific user's saved preferences profile
+      try {
+        const userPrefs = await preferencesService.loadPreferencesForUser(activeEmail);
+        audioEngine.applyPreferencesProfile(userPrefs);
+        teslaKeepAlive.loadUserPreferences(activeEmail);
+        if (userPrefs.theme && (userPrefs.theme === 'dark' || userPrefs.theme === 'light')) {
+          setTheme(userPrefs.theme);
+          localStorage.setItem('audiocar_theme', userPrefs.theme);
+        }
+      } catch (e) {
+        console.warn('Could not apply user preferences on auth change:', e);
+      }
+
       if (authUser && cloudService.getActiveProviderId() === 'drive') {
         setUser(authUser);
         syncCloudContent();
+      } else if (!authUser) {
+        setUser(null);
       }
     });
 
@@ -134,11 +165,43 @@ export function App() {
     }
   };
 
-  const syncCloudContent = async () => {
+  const syncCloudContent = async (isManual: boolean = false) => {
     setIsLoading(true);
     try {
-      const { tracks: cloudTracks, folders: cloudFolders } = await cloudService.syncLibrary();
+      const syncResult = await cloudService.syncLibraryDetailed();
       const hideDemoTracks = await dbService.isDemoTracksHidden();
+
+      if (isManual) {
+        if (syncResult.status === 'not_authenticated') {
+          setSyncNotice({
+            isOpen: true,
+            type: 'not_connected'
+          });
+          return;
+        }
+
+        if (syncResult.status === 'root_folder_not_found') {
+          setSyncNotice({
+            isOpen: true,
+            type: 'mimusica_not_found',
+            userEmail: syncResult.userEmail
+          });
+          return;
+        }
+
+        if (syncResult.status === 'synced') {
+          setSyncNotice({
+            isOpen: true,
+            type: 'sync_success',
+            userEmail: syncResult.userEmail,
+            foldersCount: syncResult.foldersCount,
+            tracksCount: syncResult.tracksCount
+          });
+        }
+      }
+
+      const cloudTracks = syncResult.tracks || [];
+      const cloudFolders = syncResult.folders || [];
 
       // Merge with demo tracks (unless user removed them)
       const mergedMap = new Map<string, AudioTrack>();
@@ -168,6 +231,7 @@ export function App() {
 
   const handleDeleteDemoTracks = async () => {
     await dbService.deleteDemoTracks();
+    preferencesService.updateCurrentPreference('hideDemoTracks', true);
     const remaining = tracks.filter((t) => t.source !== 'demo' && !t.id.startsWith('demo_'));
     setTracks(remaining);
 
@@ -183,6 +247,7 @@ export function App() {
 
   const handleRestoreDemoTracks = async () => {
     await dbService.setDemoTracksHidden(false);
+    preferencesService.updateCurrentPreference('hideDemoTracks', false);
     await dbService.saveTracks(DEMO_TRACKS);
     const mergedMap = new Map<string, AudioTrack>();
     DEMO_TRACKS.forEach((t) => mergedMap.set(t.id, t));
@@ -242,7 +307,7 @@ export function App() {
           tracks={tracks}
           folders={folders}
           currentTrackId={audioEngine.getCurrentTrack()?.id}
-          onRefreshDrive={syncCloudContent}
+          onRefreshDrive={() => syncCloudContent(true)}
           isLoading={isLoading}
           onDeleteDemoTracks={handleDeleteDemoTracks}
           onRestoreDemoTracks={handleRestoreDemoTracks}
@@ -269,7 +334,7 @@ export function App() {
         <AuthModal
           onClose={() => setActiveOverlay('none')}
           onSuccess={() => {
-            syncCloudContent();
+            syncCloudContent(true);
           }}
         />
       )}
@@ -294,6 +359,19 @@ export function App() {
           onOpenCloud={() => setActiveOverlay('auth')}
           onOpenLibrary={() => setActiveOverlay('library')}
           onOpenSettings={() => setActiveOverlay('settings')}
+        />
+      )}
+
+      {/* 4. SYNC STATUS & ALERT MODAL */}
+      {syncNotice.isOpen && (
+        <SyncNoticeModal
+          type={syncNotice.type}
+          userEmail={syncNotice.userEmail}
+          foldersCount={syncNotice.foldersCount}
+          tracksCount={syncNotice.tracksCount}
+          onClose={() => setSyncNotice((prev) => ({ ...prev, isOpen: false }))}
+          onConnectSuccess={() => syncCloudContent(true)}
+          onFolderCreated={() => syncCloudContent(true)}
         />
       )}
     </div>

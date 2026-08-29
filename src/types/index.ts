@@ -127,3 +127,23 @@ export interface DriveAuthUser {
 }
 
 export type ActiveView = 'player' | 'library' | 'playlists' | 'recent' | 'favorites' | 'folders' | 'search';
+
+export interface UserPreferences {
+  email: string;
+  playbackMode: PlaybackMode;
+  playbackScope: PlaybackScope;
+  volume: number;
+  playbackRate: number;
+  eqPreset: string;
+  isCrossfadeEnabled: boolean;
+  crossfadeDuration: number;
+  isFadeInOutEnabled: boolean;
+  fadeInOutDuration: number;
+  isNormalizationEnabled: boolean;
+  normalizationPreset: 'balanced' | 'dynamic' | 'night';
+  bufferAheadCount: number;
+  autoRefreshMinutes: number;
+  theme: 'dark' | 'light';
+  hideDemoTracks: boolean;
+  lastUpdated: number;
+}

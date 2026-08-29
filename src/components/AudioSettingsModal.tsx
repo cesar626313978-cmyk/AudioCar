@@ -9,10 +9,11 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { PlayerState, PlaybackMode, PlaybackScope, AudioTrack } from '../types';
+import { PlayerState, PlaybackMode, PlaybackScope, AudioTrack, DriveAuthUser } from '../types';
 import { audioEngine } from '../services/audioEngine';
 import { authService } from '../services/authService';
 import { teslaKeepAlive } from '../services/teslaKeepAliveService';
+import { preferencesService } from '../services/preferencesService';
 import {
   X,
   Sliders,
@@ -38,7 +39,10 @@ import {
   MessageSquare,
   RefreshCw,
   Clock,
-  Shield
+  Shield,
+  RotateCcw,
+  User,
+  UserCheck
 } from 'lucide-react';
 
 import { LogoDownloadHelper } from './LogoDownloadHelper';
@@ -70,12 +74,30 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
   const [savedClientIdMsg, setSavedClientIdMsg] = useState(false);
   const [clearedCacheMsg, setClearedCacheMsg] = useState(false);
   const [keepAliveStatus, setKeepAliveStatus] = useState(teslaKeepAlive.getStatus());
+  const [currentUser, setCurrentUser] = useState<DriveAuthUser | null>(authService.getUser());
+  const [resetMsg, setResetMsg] = useState(false);
 
   useEffect(() => {
-    return teslaKeepAlive.subscribe((status) => {
+    const unsubKeepAlive = teslaKeepAlive.subscribe((status) => {
       setKeepAliveStatus(status);
     });
+    const unsubAuth = authService.subscribe((user) => {
+      setCurrentUser(user);
+    });
+    return () => {
+      unsubKeepAlive();
+      unsubAuth();
+    };
   }, []);
+
+  const handleResetDefaults = async () => {
+    const email = currentUser?.email || 'default';
+    const defaults = await preferencesService.resetToDefaults(email);
+    audioEngine.applyPreferencesProfile(defaults);
+    teslaKeepAlive.setAutoRefreshInterval(defaults.autoRefreshMinutes);
+    setResetMsg(true);
+    setTimeout(() => setResetMsg(false), 3000);
+  };
 
   const currentTrack = audioEngine.getCurrentTrack();
   const currentFolderName = currentTrack?.folderPath || (currentTrack?.album && currentTrack.album !== 'Google Drive Cloud' && currentTrack.album !== 'mimusica' ? currentTrack.album : 'Carpeta /mimusica');
@@ -141,6 +163,52 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
 
         {/* Scrollable Modal Content */}
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6 custom-scrollbar">
+
+        {/* 0. Perfil de Usuario & Preferencias Persistentes por Cuenta */}
+        <div className="p-4 rounded-2xl bg-[#0f0f0f] border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            {currentUser?.picture ? (
+              <img
+                src={currentUser.picture}
+                alt={currentUser.name}
+                className="w-10 h-10 rounded-full border border-neutral-700 object-cover shrink-0"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-neutral-800 border border-neutral-700 flex items-center justify-center text-neutral-300 font-bold shrink-0">
+                {currentUser?.email ? currentUser.email.charAt(0).toUpperCase() : <User className="w-5 h-5 text-neutral-400" />}
+              </div>
+            )}
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-bold text-white">
+                  {currentUser ? currentUser.email : 'Modo Local / Invitado'}
+                </span>
+                <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Perfil Personalizado Activo
+                </span>
+              </div>
+              <p className="text-xs text-neutral-400 mt-0.5">
+                {currentUser
+                  ? 'Tus modos, EQ, crossfade y búfer se guardan automáticamente para esta cuenta de Gmail.'
+                  : 'Inicia sesión con tu cuenta de Gmail para que tus preferencias se guarden por usuario.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleResetDefaults}
+              className="hitbox-48 px-3.5 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-700 text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
+              title="Restablecer ajustes de audio recomendados para el coche"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-neutral-400" />
+              <span>{resetMsg ? '¡Restablecido!' : 'Valores Recomendados'}</span>
+            </button>
+          </div>
+        </div>
 
         {/* 1. Playback Modes (Lineal, Suflé, Continuo, Repetir 1) */}
         <div className="space-y-3">

@@ -12,6 +12,7 @@
 
 import { AudioTrack, PlaybackMode, PlaybackScope } from '../types';
 import { dbService } from './dbService';
+import { preferencesService } from './preferencesService';
 
 export interface InCarPersistedSession {
   queue: AudioTrack[];
@@ -180,6 +181,18 @@ class InCarKeepAliveService {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
   }
 
+  public async loadUserPreferences(userEmail?: string) {
+    try {
+      const prefs = await preferencesService.loadPreferencesForUser(userEmail);
+      const minutes = typeof prefs.autoRefreshMinutes === 'number' ? prefs.autoRefreshMinutes : 5;
+      this.autoRefreshMinutes = minutes;
+      this.nextRefreshInSeconds = minutes > 0 ? minutes * 60 : 0;
+      this.notifyListeners();
+    } catch {
+      // Use fallback
+    }
+  }
+
   /**
    * Set Auto-Refresh Interval in Minutes (0 = Disabled, 3, 5, 10, 15)
    */
@@ -187,6 +200,7 @@ class InCarKeepAliveService {
     this.autoRefreshMinutes = Math.max(0, minutes);
     this.nextRefreshInSeconds = minutes > 0 ? minutes * 60 : 0;
     await dbService.setSetting(AUTO_REFRESH_KEY, this.autoRefreshMinutes);
+    preferencesService.updateCurrentPreference('autoRefreshMinutes', this.autoRefreshMinutes);
     this.notifyListeners();
   }
 
