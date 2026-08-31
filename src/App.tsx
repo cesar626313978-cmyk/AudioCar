@@ -110,9 +110,7 @@ export function App() {
     loadInitialData();
 
     // 5. Init Google Token client
-    authService.initTokenClient(() => {
-      syncCloudContent();
-    });
+    authService.initTokenClient();
 
     return () => {
       unsubscribeAudio();
