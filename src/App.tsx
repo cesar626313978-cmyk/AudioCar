@@ -39,6 +39,7 @@ export function App() {
     userEmail?: string;
     foldersCount?: number;
     tracksCount?: number;
+    trackTitle?: string;
   }>({
     isOpen: false,
     type: 'not_connected'
@@ -106,16 +107,26 @@ export function App() {
       }
     });
 
-    // 4. Load initial local data & queue
+    // 4. Subscribe to Drive Auth Required events (triggered when user tries to play or access Drive content while disconnected)
+    const unsubscribeAuthRequired = audioEngine.onAuthRequired((provider, track) => {
+      setSyncNotice({
+        isOpen: true,
+        type: 'not_connected',
+        trackTitle: track?.title || track?.name
+      });
+    });
+
+    // 5. Load initial local data & queue
     loadInitialData();
 
-    // 5. Init Google Token client
+    // 6. Init Google Token client
     authService.initTokenClient();
 
     return () => {
       unsubscribeAudio();
       unsubscribeCloud();
       unsubscribeAuth();
+      unsubscribeAuthRequired();
     };
   }, []);
 
@@ -365,8 +376,12 @@ export function App() {
           userEmail={syncNotice.userEmail}
           foldersCount={syncNotice.foldersCount}
           tracksCount={syncNotice.tracksCount}
+          trackTitle={syncNotice.trackTitle}
           onClose={() => setSyncNotice((prev) => ({ ...prev, isOpen: false }))}
-          onConnectSuccess={() => syncCloudContent(true)}
+          onConnectSuccess={() => {
+            syncCloudContent(true);
+            audioEngine.play();
+          }}
           onFolderCreated={() => syncCloudContent(true)}
         />
       )}

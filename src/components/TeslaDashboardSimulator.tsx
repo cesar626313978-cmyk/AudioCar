@@ -8,6 +8,7 @@ import React, { useState, useEffect } from 'react';
 import { PlayerState, PlaybackMode } from '../types';
 import { audioEngine } from '../services/audioEngine';
 import { dbService } from '../services/dbService';
+import { authService } from '../services/authService';
 import { AudioVisualizer } from './AudioVisualizer';
 import { AlbumArtwork } from './AlbumArtwork';
 import {
@@ -41,7 +42,8 @@ import {
   Sparkles,
   RefreshCw,
   Shield,
-  Clock
+  Clock,
+  Cloud
 } from 'lucide-react';
 
 interface TeslaDashboardSimulatorProps {
@@ -461,6 +463,19 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                   />
                 </div>
               </div>
+
+              {/* Notice when track is in Google Drive but not connected */}
+              {audioEngine.isTrackRequiringAuth(currentTrack) && (
+                <div 
+                  onClick={() => audioEngine.notifyAuthRequired('drive', currentTrack || undefined)}
+                  className="mt-1 flex items-center gap-2 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs cursor-pointer hover:bg-amber-500/20 transition-all"
+                  role="button"
+                  tabIndex={0}
+                >
+                  <Cloud className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                  <span className="font-semibold truncate">Sin conexión a Drive • Toca para conectar</span>
+                </div>
+              )}
             </div>
 
             {/* Right: Tactile Favorite Heart Button */}

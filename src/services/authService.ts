@@ -27,7 +27,7 @@ const AUTH_STORAGE_KEY = 'tesladrive_auth_session';
 const CLIENT_ID_KEY = 'tesladrive_custom_client_id';
 
 // Default provisioned client ID from Google Cloud Console project setup
-const DEFAULT_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string) || (firebaseConfig as any).oAuthClientId || '463075236141-sspqgvtjaaakh5gna6alvdahhjl827od.apps.googleusercontent.com';
+const DEFAULT_CLIENT_ID = ((import.meta as any).env?.VITE_GOOGLE_CLIENT_ID as string) || (firebaseConfig as any).oAuthClientId || '463075236141-sspqgvtjaaakh5gna6alvdahhjl827od.apps.googleusercontent.com';
 
 const SCOPES = [
   'https://www.googleapis.com/auth/drive.file',

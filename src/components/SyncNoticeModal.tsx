@@ -16,6 +16,7 @@ interface SyncNoticeModalProps {
   userEmail?: string;
   foldersCount?: number;
   tracksCount?: number;
+  trackTitle?: string;
   onClose: () => void;
   onConnectSuccess: () => void;
   onFolderCreated: () => void;
@@ -26,6 +27,7 @@ export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
   userEmail,
   foldersCount = 0,
   tracksCount = 0,
+  trackTitle,
   onClose,
   onConnectSuccess,
   onFolderCreated
@@ -94,17 +96,23 @@ export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
                   Google Drive No Conectado
                 </h3>
                 <p className="text-xs text-neutral-400 mt-0.5">
-                  Autenticación requerida para sincronizar pistas
+                  {trackTitle ? 'Autenticación requerida para reproducir pista' : 'Autenticación requerida para sincronizar y reproducir'}
                 </p>
               </div>
             </div>
 
             <div className="bg-[#141414] border border-neutral-800/80 rounded-2xl p-4 space-y-2 text-sm text-neutral-300">
-              <p>
-                Para sincronizar tu música personalizada y explorar tus carpetas desde la pantalla de Biblioteca, necesitas iniciar sesión con tu cuenta de <strong>Google Drive</strong>.
-              </p>
+              {trackTitle ? (
+                <p>
+                  Estás intentando reproducir <strong className="text-white font-semibold">"{trackTitle}"</strong>, que está en tu colección de Google Drive, pero tu sesión no está activa o ha caducado.
+                </p>
+              ) : (
+                <p>
+                  Para reproducir tu música en streaming, explorar tus carpetas o sincronizar tu colección personalizada, necesitas iniciar sesión con tu cuenta de <strong>Google Drive</strong>.
+                </p>
+              )}
               <p className="text-xs text-neutral-400">
-                AudioCar buscará tu música en la carpeta <code className="text-amber-400 font-mono">/mimusica</code> sin transferir tus archivos a ningún servidor externo.
+                AudioCar accederá de forma segura a tus archivos en la carpeta <code className="text-amber-400 font-mono">/mimusica</code> mediante streaming directo.
               </p>
             </div>
 

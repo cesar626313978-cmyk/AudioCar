@@ -14,9 +14,11 @@ import { AudioTrack, PlayerState, RepeatMode, PlaybackMode, PlaybackScope, Image
 import { dbService } from './dbService';
 import { driveService } from './driveService';
 import { cloudService } from './cloudService';
+import { authService } from './authService';
 import { preferencesService } from './preferencesService';
 
 type StateListener = (state: PlayerState) => void;
+type AuthRequiredListener = (provider: 'drive', track?: AudioTrack) => void;
 
 class AudioEngine {
   private audioA: HTMLAudioElement;
@@ -75,6 +77,7 @@ class AudioEngine {
   };
 
   private listeners: Set<StateListener> = new Set();
+  private authRequiredListeners: Set<AuthRequiredListener> = new Set();
   private originalQueueOrder: AudioTrack[] = [];
   private retryCount = 0;
   private readonly MAX_RETRIES = 4;
@@ -394,7 +397,16 @@ class AudioEngine {
     audioEl.addEventListener('error', (e) => {
       if (this.activePlayerIndex === playerIndex) {
         console.error('Audio playback error:', audioEl.error, e);
-        if (this.retryCount < this.MAX_RETRIES && this.getCurrentTrack()) {
+        const curTrack = this.getCurrentTrack();
+        if (this.isTrackRequiringAuth(curTrack)) {
+          this.state.isLoading = false;
+          this.state.isPlaying = false;
+          this.state.error = 'drive_auth_required';
+          this.notifyListeners();
+          this.notifyAuthRequired('drive', curTrack || undefined);
+          return;
+        }
+        if (this.retryCount < this.MAX_RETRIES && curTrack) {
           this.retryCount++;
           setTimeout(() => this.playCurrentTrack(), 1000);
         } else {
@@ -617,6 +629,15 @@ class AudioEngine {
     const track = this.getCurrentTrack();
     if (!track) return;
 
+    if (this.isTrackRequiringAuth(track)) {
+      this.state.isLoading = false;
+      this.state.isPlaying = false;
+      this.state.error = 'drive_auth_required';
+      this.notifyListeners();
+      this.notifyAuthRequired('drive', track);
+      return;
+    }
+
     this.initWebAudio();
     if (this.audioContext && this.audioContext.state === 'suspended') {
       this.audioContext.resume().catch(() => {});
@@ -663,7 +684,17 @@ class AudioEngine {
       console.error('playCurrentTrack error:', err);
       this.state.isLoading = false;
       this.state.isPlaying = false;
-      this.state.error = err.message || 'Error al reproducir audio';
+      const isAuthErr = err?.message?.includes('Google Drive') || 
+                        err?.message?.includes('sign in') || 
+                        err?.message?.includes('session') || 
+                        err?.message?.includes('401') ||
+                        err?.status === 401;
+      if (isAuthErr || this.isTrackRequiringAuth(track)) {
+        this.state.error = 'drive_auth_required';
+        this.notifyAuthRequired('drive', track);
+      } else {
+        this.state.error = err.message || 'Error al reproducir audio';
+      }
       this.notifyListeners();
     }
   }
@@ -677,6 +708,17 @@ class AudioEngine {
 
     const targetTrack = this.state.queue[targetIdx];
     if (!targetTrack) return;
+
+    if (this.isTrackRequiringAuth(targetTrack)) {
+      this.isCrossfading = false;
+      this.state.isLoading = false;
+      this.state.isPlaying = false;
+      this.state.currentTrackIndex = targetIdx;
+      this.state.error = 'drive_auth_required';
+      this.notifyListeners();
+      this.notifyAuthRequired('drive', targetTrack);
+      return;
+    }
 
     // If not currently playing or both transitions disabled, perform standard direct play
     const shouldUseTransition = this.state.isPlaying && (this.state.isCrossfadeEnabled || this.state.isFadeInOutEnabled);
@@ -783,6 +825,16 @@ class AudioEngine {
     if (this.fadeOutTimer) {
       clearTimeout(this.fadeOutTimer);
       this.fadeOutTimer = null;
+    }
+
+    const currentTrack = this.getCurrentTrack();
+    if (this.isTrackRequiringAuth(currentTrack)) {
+      this.state.isLoading = false;
+      this.state.isPlaying = false;
+      this.state.error = 'drive_auth_required';
+      this.notifyListeners();
+      this.notifyAuthRequired('drive', currentTrack || undefined);
+      return;
     }
 
     if (this.activeAudio.src && this.state.currentTrackIndex !== -1) {
@@ -1268,6 +1320,29 @@ class AudioEngine {
         localStorage.setItem('audiocar_session_state', JSON.stringify(session));
       } catch {}
     }
+  }
+
+  public isTrackRequiringAuth(track?: AudioTrack | null): boolean {
+    if (!track) return false;
+    const isDriveTrack = track.source === 'drive' || (!track.source && !!track.driveFileId) || (!track.source && !!track.cloudFileId);
+    if (!isDriveTrack) return false;
+    const token = authService.getAccessToken();
+    return !token && !track.cachedBlobUrl;
+  }
+
+  public onAuthRequired(listener: AuthRequiredListener): () => void {
+    this.authRequiredListeners.add(listener);
+    return () => this.authRequiredListeners.delete(listener);
+  }
+
+  public notifyAuthRequired(provider: 'drive', track?: AudioTrack) {
+    this.authRequiredListeners.forEach((l) => {
+      try {
+        l(provider, track);
+      } catch (e) {
+        console.warn('Auth required listener error:', e);
+      }
+    });
   }
 
   public getState(): PlayerState {
