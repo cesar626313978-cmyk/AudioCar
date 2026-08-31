@@ -142,7 +142,6 @@ export interface UserPreferences {
   isNormalizationEnabled: boolean;
   normalizationPreset: 'balanced' | 'dynamic' | 'night';
   bufferAheadCount: number;
-  autoRefreshMinutes: number;
   theme: 'dark' | 'light';
   hideDemoTracks: boolean;
   lastUpdated: number;

@@ -118,6 +118,9 @@ const TRACK_THEMES = [
   }
 ];
 
+// In-memory instant cache for discovered folder artworks across components
+const folderArtworkCache = new Map<string, { url: string; format: ImageFormat }>();
+
 export const AlbumArtwork: React.FC<AlbumArtworkProps> = ({
   track,
   url,
@@ -132,39 +135,57 @@ export const AlbumArtwork: React.FC<AlbumArtworkProps> = ({
   className = '',
   rounded = true
 }) => {
+  const rawUrl = url || track?.thumbnailUrl || null;
+  const folderId = track?.folderId && track.folderId !== 'root' ? track.folderId : null;
+  
+  // Instant synchronous lookup from memory cache if available
+  const cachedArt = folderId ? folderArtworkCache.get(folderId) : null;
+
   const [hasError, setHasError] = useState(false);
-  const [discoveredArtworkUrl, setDiscoveredArtworkUrl] = useState<string | null>(null);
-  const [discoveredFormat, setDiscoveredFormat] = useState<ImageFormat>('JPG');
+  const [discoveredArtworkUrl, setDiscoveredArtworkUrl] = useState<string | null>(cachedArt?.url || null);
+  const [discoveredFormat, setDiscoveredFormat] = useState<ImageFormat>(cachedArt?.format || 'JPG');
+  const [isImgLoaded, setIsImgLoaded] = useState(false);
 
   // Derive title, artist, format and image URL from track or props
   const trackTitle = track?.title || propTitle || 'AudioCar Studio';
   const trackArtist = track?.artist || propArtist || 'Google Drive';
-  const rawUrl = url || track?.thumbnailUrl || null;
   const activeFormat = propFormat || track?.artworkFormat || discoveredFormat || 'JPG';
 
   // Look up folder artwork if track doesn't have an embedded thumbnail
   useEffect(() => {
     let isMounted = true;
+    setHasError(false);
+    setIsImgLoaded(false);
 
     if (rawUrl) {
-      setHasError(false);
+      setDiscoveredArtworkUrl(null);
       return;
     }
 
-    if (track?.folderId && track.folderId !== 'root') {
-      driveService.discoverFolderArtwork(track.folderId).then((art) => {
+    if (folderId) {
+      if (folderArtworkCache.has(folderId)) {
+        const cached = folderArtworkCache.get(folderId)!;
+        setDiscoveredArtworkUrl(cached.url);
+        setDiscoveredFormat(cached.format);
+        return;
+      }
+
+      driveService.discoverFolderArtwork(folderId).then((art) => {
         if (isMounted && art && art.url) {
+          folderArtworkCache.set(folderId, { url: art.url, format: art.format || 'JPG' });
           setDiscoveredArtworkUrl(art.url);
           setDiscoveredFormat(art.format || 'JPG');
           setHasError(false);
         }
       }).catch(() => {});
+    } else {
+      setDiscoveredArtworkUrl(null);
     }
 
     return () => {
       isMounted = false;
     };
-  }, [track?.folderId, rawUrl]);
+  }, [track?.id, folderId, rawUrl]);
 
   // Compute initials for the cover art monogram
   const initials = useMemo(() => {
@@ -228,12 +249,16 @@ export const AlbumArtwork: React.FC<AlbumArtworkProps> = ({
     >
       {activeImage ? (
         <img
+          key={activeImage}
           src={activeImage}
           alt={`${trackTitle} - ${trackArtist}`}
           referrerPolicy="no-referrer"
-          className="w-full h-full object-cover shadow-inner"
+          decoding="async"
+          onLoad={() => setIsImgLoaded(true)}
+          className={`w-full h-full object-cover shadow-inner transition-opacity duration-300 ${
+            isImgLoaded ? 'opacity-100' : 'opacity-0'
+          }`}
           onError={() => setHasError(true)}
-          loading="lazy"
         />
       ) : (
         /* Dynamic Colorful Vinyl Artwork for Tracks */

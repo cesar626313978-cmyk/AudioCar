@@ -12,7 +12,6 @@ import React, { useState, useEffect } from 'react';
 import { PlayerState, PlaybackMode, PlaybackScope, AudioTrack, DriveAuthUser } from '../types';
 import { audioEngine } from '../services/audioEngine';
 import { authService } from '../services/authService';
-import { teslaKeepAlive } from '../services/teslaKeepAliveService';
 import { preferencesService } from '../services/preferencesService';
 import {
   X,
@@ -37,9 +36,6 @@ import {
   Wifi,
   HardDrive,
   MessageSquare,
-  RefreshCw,
-  Clock,
-  Shield,
   RotateCcw,
   User,
   UserCheck
@@ -73,19 +69,14 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
   const [customClientId, setCustomClientId] = useState(authService.getClientId());
   const [savedClientIdMsg, setSavedClientIdMsg] = useState(false);
   const [clearedCacheMsg, setClearedCacheMsg] = useState(false);
-  const [keepAliveStatus, setKeepAliveStatus] = useState(teslaKeepAlive.getStatus());
   const [currentUser, setCurrentUser] = useState<DriveAuthUser | null>(authService.getUser());
   const [resetMsg, setResetMsg] = useState(false);
 
   useEffect(() => {
-    const unsubKeepAlive = teslaKeepAlive.subscribe((status) => {
-      setKeepAliveStatus(status);
-    });
     const unsubAuth = authService.subscribe((user) => {
       setCurrentUser(user);
     });
     return () => {
-      unsubKeepAlive();
       unsubAuth();
     };
   }, []);
@@ -94,7 +85,6 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
     const email = currentUser?.email || 'default';
     const defaults = await preferencesService.resetToDefaults(email);
     audioEngine.applyPreferencesProfile(defaults);
-    teslaKeepAlive.setAutoRefreshInterval(defaults.autoRefreshMinutes);
     setResetMsg(true);
     setTimeout(() => setResetMsg(false), 3000);
   };
@@ -649,105 +639,6 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
                 className="text-[11px] text-neutral-400 hover:text-white underline"
               >
                 Refrescar Buffer
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* 6. Keep-Alive & Auto-Refresco Anti-Bloqueo de Navegador */}
-        <div className="space-y-3 pt-2 border-t border-neutral-800">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-2">
-              <RefreshCw className="w-4 h-4 text-white" />
-              <span>Keep-Alive & Auto-Refresco Anti-Suspensión</span>
-            </h3>
-            <span className="text-[11px] font-mono text-neutral-300 bg-neutral-900 px-2 py-0.5 rounded border border-neutral-800 flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${keepAliveStatus.autoRefreshMinutes > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-neutral-600'}`} />
-              {keepAliveStatus.autoRefreshMinutes > 0 ? `Cada ${keepAliveStatus.autoRefreshMinutes}m` : 'Desactivado'}
-            </span>
-          </div>
-
-          <div className="p-4 rounded-2xl bg-[#0f0f0f] border border-neutral-800 space-y-4">
-            <div>
-              <div className="text-sm font-bold text-white flex items-center gap-2">
-                <Shield className="w-4 h-4 text-emerald-400" />
-                <span>Protección contra la pausa del navegador de a bordo</span>
-              </div>
-              <div className="text-xs text-neutral-400 mt-1 leading-relaxed">
-                El navegador del coche suspende automáticamente pestañas tras varias canciones inactivas. Con este sistema, la página se recarga periódicamente de forma limpia en segundo plano y recupera al instante la cola y el segundo exacto de la pista gracias a la caché local.
-              </div>
-            </div>
-
-            {/* Selector de intervalo de Auto-Refresco */}
-            <div className="pt-2 border-t border-neutral-800/60 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-mono text-neutral-400 uppercase tracking-wider block">
-                  Intervalo de auto-refresco en conducción:
-                </span>
-                {keepAliveStatus.autoRefreshMinutes > 0 && (
-                  <span className="text-[11px] font-mono text-neutral-400 flex items-center gap-1">
-                    <Clock className="w-3 h-3 text-neutral-500" />
-                    Próximo: {Math.floor(keepAliveStatus.nextRefreshInSeconds / 60)}:{(keepAliveStatus.nextRefreshInSeconds % 60).toString().padStart(2, '0')}
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {[
-                  { m: 0, label: 'Off', sub: 'Sin refresco' },
-                  { m: 3, label: '3 min', sub: 'Rápido' },
-                  { m: 5, label: '5 min', sub: 'Recomendado' },
-                  { m: 10, label: '10 min', sub: 'Extendido' }
-                ].map((opt) => {
-                  const isSelected = keepAliveStatus.autoRefreshMinutes === opt.m;
-                  return (
-                    <button
-                      key={opt.m}
-                      type="button"
-                      onClick={() => teslaKeepAlive.setAutoRefreshInterval(opt.m)}
-                      className={`hitbox-48 p-3 rounded-xl border text-center transition-all ${
-                        isSelected
-                          ? 'bg-white text-black font-bold border-white shadow-md'
-                          : 'bg-neutral-900/80 hover:bg-neutral-800 text-neutral-300 border-neutral-800'
-                      }`}
-                    >
-                      <div className="text-sm">{opt.label}</div>
-                      <div className={`text-[10px] mt-0.5 ${isSelected ? 'text-neutral-800 font-semibold' : 'text-neutral-400'}`}>
-                        {opt.sub}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Badges de Estado & Botón de Prueba */}
-            <div className="pt-2 border-t border-neutral-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-neutral-400">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${keepAliveStatus.wakeLockActive ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                  <span className="text-neutral-300 font-mono text-[11px]">
-                    {keepAliveStatus.wakeLockActive ? 'Screen Wake Lock: Activo (CPU no entra en suspensión)' : 'Screen Wake Lock: Pendiente de interacción'}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span className="text-neutral-300 font-mono text-[11px]">
-                    Watchdog Anticuelgues: Activo (Auto-revive si se congela)
-                  </span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  teslaKeepAlive.triggerSeamlessRefresh(playerState);
-                }}
-                className="hitbox-48 px-3.5 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-200 border border-neutral-700 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 shrink-0 transition-colors"
-                title="Ejecuta una recarga de prueba ahora mismo restaurando instantáneamente la canción y segundo actual"
-              >
-                <RefreshCw className="w-3.5 h-3.5 text-neutral-400" />
-                <span>Probar Refresco Ahora</span>
               </button>
             </div>
           </div>

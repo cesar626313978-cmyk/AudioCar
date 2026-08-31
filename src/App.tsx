@@ -10,7 +10,6 @@ import { audioEngine } from './services/audioEngine';
 import { authService } from './services/authService';
 import { cloudService } from './services/cloudService';
 import { dbService } from './services/dbService';
-import { teslaKeepAlive } from './services/teslaKeepAliveService';
 import { preferencesService } from './services/preferencesService';
 import { DEMO_TRACKS } from './data/demoTracks';
 
@@ -91,7 +90,6 @@ export function App() {
       try {
         const userPrefs = await preferencesService.loadPreferencesForUser(activeEmail);
         audioEngine.applyPreferencesProfile(userPrefs);
-        teslaKeepAlive.loadUserPreferences(activeEmail);
         if (userPrefs.theme && (userPrefs.theme === 'dark' || userPrefs.theme === 'light')) {
           setTheme(userPrefs.theme);
           localStorage.setItem('audiocar_theme', userPrefs.theme);

@@ -8,7 +8,6 @@ import React, { useState, useEffect } from 'react';
 import { PlayerState, PlaybackMode } from '../types';
 import { audioEngine } from '../services/audioEngine';
 import { dbService } from '../services/dbService';
-import { teslaKeepAlive } from '../services/teslaKeepAliveService';
 import { AudioVisualizer } from './AudioVisualizer';
 import { AlbumArtwork } from './AlbumArtwork';
 import {
@@ -182,13 +181,6 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
   const [showQueueDrawer, setShowQueueDrawer] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubValue, setScrubValue] = useState(0);
-  const [keepAliveStatus, setKeepAliveStatus] = useState(teslaKeepAlive.getStatus());
-
-  useEffect(() => {
-    return teslaKeepAlive.subscribe((status) => {
-      setKeepAliveStatus(status);
-    });
-  }, []);
 
   // Ambient LED State (Synced with localStorage)
   const [ledColor, setLedColor] = useState<TeslaLedColor>(() => {
@@ -397,7 +389,7 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
 
           {/* A. RECTANGULAR COMPACT TRACK BANNER (Framed by Ambient LED Strip) */}
           <div
-            className={`w-full bg-[#101010] rounded-2xl sm:rounded-3xl p-3 sm:p-4 shadow-2xl flex items-center justify-between gap-3 sm:gap-4 relative overflow-hidden transition-all duration-500 ${
+            className={`w-full bg-[#101010] rounded-2xl sm:rounded-3xl p-3 sm:p-4 shadow-2xl flex items-center justify-between gap-3 sm:gap-4 relative overflow-hidden transition-colors duration-300 ${
               ledColor !== 'off'
                 ? `car-led-frame car-led-glow ${
                     playerState.isPlaying && isLedPulseActive
@@ -449,11 +441,13 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                 </span>
               </div>
 
-              <h1 className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight truncate leading-tight">
-                {currentTrack?.title || currentTrack?.name || 'Selecciona una canción'}
-              </h1>
+              <div className="min-h-[1.75rem] sm:min-h-[2rem] flex items-center">
+                <h1 className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight truncate leading-tight w-full">
+                  {currentTrack?.title || currentTrack?.name || 'Selecciona una canción'}
+                </h1>
+              </div>
 
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center justify-between gap-3 min-h-[1.25rem]">
                 <p className="text-xs sm:text-sm font-medium text-neutral-400 truncate">
                   {currentTrack?.artist || 'Google Drive Cloud Audio'}
                 </p>
@@ -504,7 +498,9 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
               {/* Visual white progress track */}
               <div className="absolute left-0 right-0 h-2 bg-neutral-800 rounded-full pointer-events-none overflow-hidden">
                 <div
-                  className="absolute top-0 bottom-0 rounded-full transition-all"
+                  className={`absolute top-0 bottom-0 rounded-full ${
+                    isScrubbing || progressPercent === 0 ? 'transition-none' : 'transition-[width] duration-150 ease-linear'
+                  }`}
                   style={{
                     width: `${progressPercent}%`,
                     backgroundColor: ledColor !== 'off' && ledColor !== 'rainbow' ? activeLedConfig.dotColor : '#FFFFFF'
@@ -544,7 +540,7 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
 
           {/* C. TACTILE AUTOMOTIVE TRANSPORT DOCK (Framed by Ambient LED Strip) */}
           <div
-            className={`w-full bg-[#101010] p-3 sm:p-4 rounded-2xl sm:rounded-3xl flex flex-col gap-3 sm:gap-4 shadow-2xl transition-all duration-500 ${
+            className={`w-full bg-[#101010] p-3 sm:p-4 rounded-2xl sm:rounded-3xl flex flex-col gap-3 sm:gap-4 shadow-2xl transition-colors duration-300 ${
               ledColor !== 'off'
                 ? `car-led-frame car-led-glow ${
                     playerState.isPlaying && isLedPulseActive

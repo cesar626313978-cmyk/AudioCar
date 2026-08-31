@@ -14,7 +14,6 @@ import { AudioTrack, PlayerState, RepeatMode, PlaybackMode, PlaybackScope, Image
 import { dbService } from './dbService';
 import { driveService } from './driveService';
 import { cloudService } from './cloudService';
-import { teslaKeepAlive } from './teslaKeepAliveService';
 import { preferencesService } from './preferencesService';
 
 type StateListener = (state: PlayerState) => void;
@@ -100,69 +99,22 @@ class AudioEngine {
     this.attachAudioListeners(this.audioB, 1);
     this.setupMediaSession();
     this.restoreSavedSettings();
-    this.setupKeepAliveIntegration();
-  }
-
-  private setupKeepAliveIntegration() {
-    if (typeof window === 'undefined') return;
-
-    // 1. Listen for scheduled seamless auto-refresh
-    const onAutoRefresh = () => {
-      if (this.state.queue.length > 0) {
-        teslaKeepAlive.triggerSeamlessRefresh(this.state);
-      }
-    };
-    window.addEventListener('incar-auto-refresh-triggered', onAutoRefresh);
-    window.addEventListener('auto-refresh-triggered', onAutoRefresh);
-
-    // 2. Listen for watchdog health check (prevents silence / frozen audio after 4-5 songs)
-    const onWatchdogCheck = async () => {
-      if (!this.state.isPlaying) return;
-
-      const isHealthy = teslaKeepAlive.checkPlaybackHealth(
-        this.state.isPlaying,
-        this.activeAudio.currentTime,
-        this.state.isLoading
-      );
-
-      if (!isHealthy) {
-        console.warn('Watchdog: Playback stall detected. Auto-recovering stream pipeline...');
-        try {
-          if (this.audioContext && this.audioContext.state === 'suspended') {
-            await this.audioContext.resume();
-          }
-          if (this.activeAudio.paused && this.state.isPlaying) {
-            await this.activeAudio.play();
-          } else if (this.state.isPlaying) {
-            // Re-trigger current track seamlessly at current second
-            const savedSec = this.activeAudio.currentTime;
-            await this.playCurrentTrack();
-            if (savedSec > 2) {
-              this.seek(savedSec);
-            }
-          }
-        } catch (e) {
-          console.warn('Watchdog auto-recovery attempt notice:', e);
-        }
-      }
-    };
-    window.addEventListener('incar-watchdog-check', onWatchdogCheck);
-    window.addEventListener('watchdog-check', onWatchdogCheck);
-
-    // 3. Attempt instantaneous session restoration on initial startup / after auto-refresh
     setTimeout(() => {
       this.restorePersistedSession();
-    }, 500);
+    }, 300);
   }
 
   public async restorePersistedSession() {
-    const saved = teslaKeepAlive.getSavedSession();
-    if (!saved || !saved.queue || saved.queue.length === 0) return;
-
+    if (typeof window === 'undefined') return;
     try {
+      const raw = localStorage.getItem('audiocar_session_state');
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (!saved || !saved.queue || saved.queue.length === 0) return;
+
       this.state.queue = saved.queue;
       this.originalQueueOrder = [...saved.queue];
-      this.state.currentTrackIndex = Math.max(0, Math.min(saved.currentTrackIndex, saved.queue.length - 1));
+      this.state.currentTrackIndex = Math.max(0, Math.min(saved.currentTrackIndex || 0, saved.queue.length - 1));
       this.state.playbackMode = saved.playbackMode || this.state.playbackMode;
       this.state.playbackScope = saved.playbackScope || this.state.playbackScope;
       this.state.volume = saved.volume !== undefined ? saved.volume : this.state.volume;
@@ -179,16 +131,8 @@ class AudioEngine {
       }
 
       this.notifyListeners();
-
-      // If it was actively playing before the 5-minute auto-refresh or page restart, resume automatically
-      if (saved.isPlaying && teslaKeepAlive.getStatus().autoRecoveryEnabled) {
-        await this.playCurrentTrack();
-        if (saved.currentTime > 1) {
-          this.seek(saved.currentTime);
-        }
-      }
     } catch (err) {
-      console.warn('Could not auto-restore persisted session:', err);
+      console.warn('Could not restore persisted session:', err);
     }
   }
 
@@ -362,8 +306,11 @@ class AudioEngine {
         this.state.error = null;
         this.notifyListeners();
         this.startMediaSessionPositionSync();
-        teslaKeepAlive.setupWakeLock();
-        teslaKeepAlive.startSilentAudioCarrier();
+        if (typeof navigator !== 'undefined' && 'wakeLock' in navigator) {
+          try {
+            (navigator as any).wakeLock.request('screen').catch(() => {});
+          } catch {}
+        }
         this.persistCurrentSessionState();
       }
     });
@@ -777,6 +724,8 @@ class AudioEngine {
 
       this.activePlayerIndex = nextPlayerIndex;
       this.state.currentTrackIndex = targetIdx;
+      this.state.currentTime = 0;
+      this.state.duration = targetTrack.duration || 0;
       this.updateMediaSessionMetadata(targetTrack);
       this.notifyListeners();
       await dbService.logTrackPlayed(targetTrack.id);
@@ -1302,17 +1251,22 @@ class AudioEngine {
   }
 
   public persistCurrentSessionState() {
+    if (typeof window === 'undefined') return;
     if (this.state.queue.length > 0) {
-      teslaKeepAlive.saveSession({
-        queue: this.state.queue,
-        currentTrackIndex: this.state.currentTrackIndex,
-        currentTime: this.state.currentTime,
-        isPlaying: this.state.isPlaying,
-        playbackMode: this.state.playbackMode,
-        playbackScope: this.state.playbackScope,
-        volume: this.state.volume,
-        eqPreset: this.state.eqPreset
-      });
+      try {
+        const session = {
+          queue: this.state.queue,
+          currentTrackIndex: this.state.currentTrackIndex,
+          currentTime: this.state.currentTime,
+          isPlaying: false,
+          playbackMode: this.state.playbackMode,
+          playbackScope: this.state.playbackScope,
+          volume: this.state.volume,
+          eqPreset: this.state.eqPreset,
+          timestamp: Date.now()
+        };
+        localStorage.setItem('audiocar_session_state', JSON.stringify(session));
+      } catch {}
     }
   }
 

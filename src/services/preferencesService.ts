@@ -21,7 +21,6 @@ export const DEFAULT_PREFERENCES: Omit<UserPreferences, 'email'> = {
   isNormalizationEnabled: true,
   normalizationPreset: 'balanced',
   bufferAheadCount: 3,
-  autoRefreshMinutes: 5,
   theme: 'dark',
   hideDemoTracks: false,
   lastUpdated: Date.now()
