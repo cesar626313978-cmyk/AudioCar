@@ -302,9 +302,67 @@ class AudioEngine {
     }
   }
 
+  private syncTrackDuration(rawDuration: number, playerIndex: 0 | 1) {
+    if (this.activePlayerIndex !== playerIndex) return;
+
+    let validDuration = 0;
+    if (typeof rawDuration === 'number' && !isNaN(rawDuration) && isFinite(rawDuration) && rawDuration > 0) {
+      validDuration = rawDuration;
+    } else {
+      const activeEl = playerIndex === 0 ? this.audioA : this.audioB;
+      if (activeEl.seekable && activeEl.seekable.length > 0) {
+        const seekEnd = activeEl.seekable.end(activeEl.seekable.length - 1);
+        if (isFinite(seekEnd) && seekEnd > 0) {
+          validDuration = seekEnd;
+        }
+      }
+    }
+
+    if (validDuration > 0) {
+      const roundedDur = Math.round(validDuration * 10) / 10;
+      if (this.state.duration !== roundedDur) {
+        this.state.duration = roundedDur;
+        const curTrack = this.getCurrentTrack();
+        if (curTrack && (!curTrack.duration || Math.abs(curTrack.duration - roundedDur) > 1)) {
+          curTrack.duration = Math.round(roundedDur);
+          dbService.updateTrack(curTrack).catch(() => {});
+        }
+        this.updateMediaSessionPosition();
+        this.notifyListeners();
+      }
+    } else if (this.state.duration <= 0) {
+      const curTrack = this.getCurrentTrack();
+      if (curTrack && curTrack.duration && curTrack.duration > 0) {
+        this.state.duration = curTrack.duration;
+        this.notifyListeners();
+      }
+    }
+  }
+
   private attachAudioListeners(audioEl: HTMLAudioElement, playerIndex: 0 | 1) {
+    audioEl.addEventListener('loadedmetadata', () => {
+      this.syncTrackDuration(audioEl.duration, playerIndex);
+    });
+
+    audioEl.addEventListener('loadeddata', () => {
+      this.syncTrackDuration(audioEl.duration, playerIndex);
+    });
+
+    audioEl.addEventListener('canplay', () => {
+      this.syncTrackDuration(audioEl.duration, playerIndex);
+      if (this.activePlayerIndex === playerIndex) {
+        this.state.isLoading = false;
+        this.notifyListeners();
+      }
+    });
+
+    audioEl.addEventListener('canplaythrough', () => {
+      this.syncTrackDuration(audioEl.duration, playerIndex);
+    });
+
     audioEl.addEventListener('play', () => {
       if (this.activePlayerIndex === playerIndex) {
+        this.syncTrackDuration(audioEl.duration, playerIndex);
         this.state.isPlaying = true;
         this.state.isLoading = false;
         this.state.error = null;
@@ -332,6 +390,12 @@ class AudioEngine {
     audioEl.addEventListener('timeupdate', () => {
       if (this.activePlayerIndex === playerIndex) {
         this.state.currentTime = audioEl.currentTime;
+
+        // Keep duration synchronized in case duration was computed progressively by browser
+        if (this.state.duration <= 0 || (isFinite(audioEl.duration) && audioEl.duration > 0 && Math.abs(this.state.duration - audioEl.duration) > 1)) {
+          this.syncTrackDuration(audioEl.duration, playerIndex);
+        }
+
         if (audioEl.buffered.length > 0) {
           this.state.bufferedEnd = audioEl.buffered.end(audioEl.buffered.length - 1);
         }
@@ -339,7 +403,7 @@ class AudioEngine {
         // Lazy Buffering Guard: Start prefetching only after user has listened for >= 10s or 25% of track
         if (
           !this.hasTriggeredLazyPrefetch &&
-          (audioEl.currentTime >= 10 || (audioEl.duration > 0 && audioEl.currentTime >= audioEl.duration * 0.25))
+          (audioEl.currentTime >= 10 || (this.state.duration > 0 && audioEl.currentTime >= this.state.duration * 0.25))
         ) {
           this.hasTriggeredLazyPrefetch = true;
           this.prefetchUpcomingTracks().catch(() => {});
@@ -349,9 +413,9 @@ class AudioEngine {
         if (
           this.state.isCrossfadeEnabled &&
           !this.isCrossfading &&
-          audioEl.duration > 0 &&
-          audioEl.currentTime >= audioEl.duration - this.state.crossfadeDuration &&
-          audioEl.duration > this.state.crossfadeDuration * 2
+          this.state.duration > 0 &&
+          audioEl.currentTime >= this.state.duration - this.state.crossfadeDuration &&
+          this.state.duration > this.state.crossfadeDuration * 2
         ) {
           this.triggerCrossfadeToNext();
         }
@@ -364,10 +428,7 @@ class AudioEngine {
     });
 
     audioEl.addEventListener('durationchange', () => {
-      if (this.activePlayerIndex === playerIndex && !isNaN(audioEl.duration)) {
-        this.state.duration = audioEl.duration;
-        this.notifyListeners();
-      }
+      this.syncTrackDuration(audioEl.duration, playerIndex);
     });
 
     audioEl.addEventListener('waiting', () => {

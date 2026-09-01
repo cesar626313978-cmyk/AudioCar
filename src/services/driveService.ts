@@ -353,7 +353,7 @@ export class DriveService {
       }
 
       const q = encodeURIComponent(queryParts.join(' and '));
-      const fields = encodeURIComponent('nextPageToken, files(id, name, mimeType, size, modifiedTime, thumbnailLink, webContentLink, parents)');
+      const fields = encodeURIComponent('nextPageToken, files(id, name, mimeType, size, modifiedTime, thumbnailLink, webContentLink, parents, videoMediaMetadata)');
       
       let pageToken: string | undefined = undefined;
 
@@ -437,6 +437,8 @@ export class DriveService {
       const albumName = folderName !== 'mimusica' ? folderName : (parsed.album || 'mimusica');
 
       const safeMimeType = sanitizeAudioMimeType(file.mimeType, file.name);
+      const durationMillis = file.videoMediaMetadata?.durationMillis ? parseInt(file.videoMediaMetadata.durationMillis, 10) : 0;
+      const parsedDurationSec = durationMillis > 0 ? Math.round(durationMillis / 1000) : 0;
 
       return {
         id: `drive_${file.id}`,
@@ -445,7 +447,7 @@ export class DriveService {
         title: parsed.title,
         artist: parsed.artist,
         album: albumName,
-        duration: 0,
+        duration: parsedDurationSec,
         size: parseInt(file.size || '0', 10),
         mimeType: safeMimeType,
         thumbnailUrl: finalArtworkUrl,

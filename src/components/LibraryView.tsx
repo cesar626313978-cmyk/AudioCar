@@ -420,7 +420,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                         </span>
 
                         <span className="text-xs md:text-sm font-mono text-neutral-400">
-                          {formatTime(track.duration || 180)}
+                          {formatTime(track.duration)}
                         </span>
 
                         {/* Favorite Button */}

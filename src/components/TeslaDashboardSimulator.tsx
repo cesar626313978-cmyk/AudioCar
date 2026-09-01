@@ -72,7 +72,7 @@ const LED_CONFIGS: Record<
   }
 > = {
   'sport-red': {
-    name: 'Rojo Deportivo',
+    name: 'Sport Red',
     dotColor: '#E82127',
     cssVars: {
       ['--led-color' as any]: '#E82127',
@@ -84,7 +84,7 @@ const LED_CONFIGS: Record<
     }
   },
   'cyber-cyan': {
-    name: 'Cian Neón',
+    name: 'Cyber Cyan',
     dotColor: '#00F0FF',
     cssVars: {
       ['--led-color' as any]: '#00F0FF',
@@ -96,7 +96,7 @@ const LED_CONFIGS: Record<
     }
   },
   'electric-blue': {
-    name: 'Azul Hyper Electric',
+    name: 'Electric Blue',
     dotColor: '#3B82F6',
     cssVars: {
       ['--led-color' as any]: '#3B82F6',
@@ -108,7 +108,7 @@ const LED_CONFIGS: Record<
     }
   },
   'solar-amber': {
-    name: 'Ámbar Cálido Sunset',
+    name: 'Solar Amber',
     dotColor: '#F59E0B',
     cssVars: {
       ['--led-color' as any]: '#F59E0B',
@@ -120,7 +120,7 @@ const LED_CONFIGS: Record<
     }
   },
   'highland-emerald': {
-    name: 'Verde Esmeralda Neón',
+    name: 'Highland Emerald',
     dotColor: '#10B981',
     cssVars: {
       ['--led-color' as any]: '#10B981',
@@ -132,7 +132,7 @@ const LED_CONFIGS: Record<
     }
   },
   'synth-violet': {
-    name: 'Púrpura Synthwave',
+    name: 'Synth Violet',
     dotColor: '#A855F7',
     cssVars: {
       ['--led-color' as any]: '#A855F7',
@@ -144,7 +144,7 @@ const LED_CONFIGS: Record<
     }
   },
   'pure-white': {
-    name: 'Blanco Puro Studio',
+    name: 'Studio White',
     dotColor: '#FFFFFF',
     cssVars: {
       ['--led-color' as any]: '#FFFFFF',
@@ -156,7 +156,7 @@ const LED_CONFIGS: Record<
     }
   },
   'rainbow': {
-    name: 'Espectro RGB Dinámico',
+    name: 'RGB Rainbow',
     dotColor: 'conic-gradient(from 180deg at 50% 50%, #FF0055 0deg, #00F0FF 120deg, #10B981 240deg, #FF0055 360deg)',
     cssVars: {
       ['--led-color' as any]: '#FF0055',
@@ -167,7 +167,7 @@ const LED_CONFIGS: Record<
     }
   },
   'off': {
-    name: 'LED Apagado',
+    name: 'LED Off',
     dotColor: '#262626',
     cssVars: {}
   }
@@ -223,13 +223,17 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
   }, []);
 
   const formatTime = (seconds: number) => {
-    if (isNaN(seconds) || seconds < 0) return '0:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
+    if (isNaN(seconds) || seconds === null || seconds === undefined || !isFinite(seconds) || seconds < 0) {
+      return '0:00';
+    }
+    const totalSecs = Math.floor(seconds);
+    const mins = Math.floor(totalSecs / 60);
+    const secs = totalSecs % 60;
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
   const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.preventDefault();
     const val = parseFloat(e.target.value);
     setScrubValue(val);
     if (!isScrubbing) setIsScrubbing(true);
@@ -240,7 +244,8 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
     audioEngine.seek(scrubValue);
   };
 
-  const toggleFavorite = async () => {
+  const toggleFavorite = async (e?: React.MouseEvent) => {
+    e?.preventDefault();
     if (currentTrack) {
       const isFav = await dbService.toggleFavorite(currentTrack.id);
       currentTrack.isFavorite = isFav;
@@ -284,7 +289,8 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
     };
   }, []);
 
-  const toggleBrowserFullscreen = async () => {
+  const toggleBrowserFullscreen = async (e?: React.MouseEvent) => {
+    e?.preventDefault();
     try {
       const doc = document as any;
       const docEl = document.documentElement as any;
@@ -316,15 +322,27 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
     }
   };
 
-  const progressPercent = playerState.duration > 0
-    ? ((isScrubbing ? scrubValue : playerState.currentTime) / playerState.duration) * 100
+  // Robust duration and progress resolution
+  const knownDuration = (playerState.duration && isFinite(playerState.duration) && playerState.duration > 0)
+    ? playerState.duration
+    : (currentTrack?.duration && currentTrack.duration > 0)
+      ? currentTrack.duration
+      : 0;
+
+  const currentPlayTime = isScrubbing ? scrubValue : playerState.currentTime;
+  const effectiveMaxDuration = knownDuration > 0
+    ? Math.max(knownDuration, currentPlayTime)
+    : Math.max(currentPlayTime + 1, 100);
+
+  const progressPercent = knownDuration > 0
+    ? Math.min(100, Math.max(0, (currentPlayTime / knownDuration) * 100))
     : 0;
 
   const playbackModes: { id: PlaybackMode; label: string; icon: React.FC<any>; desc: string }[] = [
-    { id: 'linear', label: 'Lineal', icon: ArrowRight, desc: 'Secuencial estándar' },
-    { id: 'shuffle', label: 'Aleatorio', icon: Shuffle, desc: 'Aleatorio dinámico (Shuffle)' },
-    { id: 'continuous', label: 'Continuo', icon: Repeat, desc: 'Bucle de toda la lista' },
-    { id: 'repeat_one', label: 'Repetir 1', icon: Repeat1, desc: 'Bucle de pista actual' }
+    { id: 'linear', label: 'Linear', icon: ArrowRight, desc: 'Standard sequence' },
+    { id: 'shuffle', label: 'Shuffle', icon: Shuffle, desc: 'Dynamic random order' },
+    { id: 'continuous', label: 'Continuous', icon: Repeat, desc: 'Repeat full queue' },
+    { id: 'repeat_one', label: 'Repeat 1', icon: Repeat1, desc: 'Repeat current track' }
   ];
 
   return (
@@ -339,7 +357,7 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
             <div className="flex items-center gap-2">
               <Sparkles className="w-3.5 h-3.5 text-neutral-300 ml-1" />
               <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-neutral-300">
-                Tira LED Ambiente:
+                Ambient LED:
               </span>
               <span className="text-[11px] sm:text-xs font-mono font-extrabold text-white">
                 {activeLedConfig.name}
@@ -353,13 +371,17 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                 return (
                   <button
                     key={colKey}
-                    onClick={() => changeLedColor(colKey)}
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      changeLedColor(colKey);
+                    }}
                     className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full transition-all flex items-center justify-center relative cursor-pointer active:scale-90 ${
                       isSelected
                         ? 'ring-2 ring-white ring-offset-2 ring-offset-black scale-110 shadow-lg'
                         : 'opacity-70 hover:opacity-100 hover:scale-105'
                     }`}
-                    title={`Ambiente ${config.name}`}
+                    title={config.name}
                     aria-label={config.name}
                   >
                     <span
@@ -373,17 +395,21 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
               {/* Pulse sync toggle */}
               {ledColor !== 'off' && (
                 <button
-                  onClick={toggleLedPulse}
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    toggleLedPulse();
+                  }}
                   className={`hitbox-48 h-6 sm:h-7 px-2.5 sm:px-3 ml-1 rounded-full text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer ${
                     isLedPulseActive
                       ? 'bg-white text-black shadow-md font-extrabold'
                       : 'bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white'
                   }`}
-                  title="Pulsación ambiental sincronizada con la música"
-                  aria-label="Pulso LED"
+                  title="Pulse ambient light to music beat"
+                  aria-label="LED Pulse"
                 >
                   <Waves className="w-3 h-3" />
-                  <span>Pulso {isLedPulseActive ? 'ON' : 'OFF'}</span>
+                  <span>Pulse {isLedPulseActive ? 'ON' : 'OFF'}</span>
                 </button>
               )}
             </div>
@@ -439,13 +465,13 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                 </div>
 
                 <span className="text-[10px] sm:text-xs font-mono font-bold text-neutral-400 bg-neutral-900/90 px-2 py-0.5 rounded-full border border-neutral-800 shrink-0">
-                  Pista {playerState.queue.length > 0 ? playerState.currentTrackIndex + 1 : 0} de {playerState.queue.length}
+                  Track {playerState.queue.length > 0 ? playerState.currentTrackIndex + 1 : 0} of {playerState.queue.length}
                 </span>
               </div>
 
               <div className="min-h-[1.75rem] sm:min-h-[2rem] flex items-center">
                 <h1 className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight truncate leading-tight w-full">
-                  {currentTrack?.title || currentTrack?.name || 'Selecciona una canción'}
+                  {currentTrack?.title || currentTrack?.name || 'Select a song'}
                 </h1>
               </div>
 
@@ -473,7 +499,7 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                   tabIndex={0}
                 >
                   <Cloud className="w-3.5 h-3.5 shrink-0 text-amber-400" />
-                  <span className="font-semibold truncate">Sin conexión a Drive • Toca para conectar</span>
+                  <span className="font-semibold truncate">Drive Disconnected • Tap to connect</span>
                 </div>
               )}
             </div>
@@ -481,10 +507,11 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
             {/* Right: Tactile Favorite Heart Button */}
             <div className="shrink-0 z-10 pl-1 flex items-center justify-center">
               <button
+                type="button"
                 onClick={toggleFavorite}
                 className="hitbox-48 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-neutral-900/90 hover:bg-neutral-800 border border-neutral-700/80 text-white transition-all flex items-center justify-center shadow-lg active:scale-95 cursor-pointer"
-                title="Añadir a favoritos"
-                aria-label="Marcar como favorita"
+                title={currentTrack?.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                aria-label="Favorite toggle"
               >
                 <Heart
                   className={`w-5 h-5 transition-transform ${
@@ -501,14 +528,14 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
               <input
                 type="range"
                 min="0"
-                max={playerState.duration || 100}
+                max={effectiveMaxDuration}
                 step="0.1"
-                value={isScrubbing ? scrubValue : playerState.currentTime}
+                value={Math.min(currentPlayTime, effectiveMaxDuration)}
                 onChange={handleSeekChange}
                 onMouseUp={handleSeekCommit}
                 onTouchEnd={handleSeekCommit}
                 className="automotive-slider w-full h-7 z-10 cursor-pointer"
-                aria-label="Posición de reproducción"
+                aria-label="Playback position"
               />
               {/* Visual white progress track */}
               <div className="absolute left-0 right-0 h-2 bg-neutral-800 rounded-full pointer-events-none overflow-hidden">
@@ -526,12 +553,16 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
 
             <div className="flex items-center justify-between text-xs sm:text-sm font-mono font-bold text-neutral-400 px-0.5">
               <div className="flex items-center gap-2">
-                <span>{formatTime(isScrubbing ? scrubValue : playerState.currentTime)}</span>
+                <span>{formatTime(currentPlayTime)}</span>
                 <button
-                  onClick={() => audioEngine.skipSeconds(-15)}
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    audioEngine.skipSeconds(-15);
+                  }}
                   className="px-2 py-0.5 rounded-md bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800 text-[10px] font-sans font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1"
-                  title="Retroceder 15 segundos"
-                  aria-label="-15 segundos"
+                  title="Rewind 15 seconds"
+                  aria-label="-15 seconds"
                 >
                   <RotateCcw className="w-3 h-3" />
                   <span>-15s</span>
@@ -540,15 +571,19 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => audioEngine.skipSeconds(15)}
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    audioEngine.skipSeconds(15);
+                  }}
                   className="px-2 py-0.5 rounded-md bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800 text-[10px] font-sans font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1"
-                  title="Adelantar 15 segundos"
-                  aria-label="+15 segundos"
+                  title="Forward 15 seconds"
+                  aria-label="+15 seconds"
                 >
                   <span>+15s</span>
                   <RotateCw className="w-3 h-3" />
                 </button>
-                <span>{formatTime(playerState.duration)}</span>
+                <span>{knownDuration > 0 ? formatTime(knownDuration) : '--:--'}</span>
               </div>
             </div>
           </div>
@@ -670,13 +705,17 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
 
             {/* 2. FILA INFERIOR: [🔊 ━━━━⚪━━━ 85%]   [🔤 Velocidad 1.0x]   [☰ Lista (122)] */}
             <div className="flex flex-col sm:flex-row items-center justify-between pt-2.5 border-t border-neutral-800/80 px-1 gap-2.5">
-              {/* Control de Volumen con Mute Directo al tocar el altavoz */}
+              {/* Volume Control with direct mute */}
               <div className="flex items-center gap-2.5 w-full sm:w-72">
                 <button
-                  onClick={() => audioEngine.toggleMute()}
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    audioEngine.toggleMute();
+                  }}
                   className="hitbox-48 w-9 h-9 rounded-full bg-neutral-900/80 hover:bg-neutral-800 text-neutral-300 hover:text-white transition-all flex items-center justify-center cursor-pointer border border-neutral-800 active:scale-90"
-                  title={playerState.isMuted || playerState.volume === 0 ? 'Desmutear audio' : 'Silenciar audio (Mute directo)'}
-                  aria-label="Silenciar"
+                  title={playerState.isMuted || playerState.volume === 0 ? 'Unmute' : 'Mute'}
+                  aria-label="Mute toggle"
                 >
                   {playerState.isMuted || playerState.volume === 0 ? (
                     <VolumeX className="w-4 h-4 text-red-400" />
@@ -691,9 +730,12 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                     max="1"
                     step="0.01"
                     value={playerState.isMuted ? 0 : playerState.volume}
-                    onChange={(e) => audioEngine.setVolume(parseFloat(e.target.value))}
+                    onChange={(e) => {
+                      e.preventDefault();
+                      audioEngine.setVolume(parseFloat(e.target.value));
+                    }}
                     className="automotive-slider w-full h-4 cursor-pointer"
-                    aria-label="Volumen"
+                    aria-label="Volume"
                   />
                 </div>
                 <span className="text-xs font-mono font-bold text-neutral-400 w-9 text-right">
@@ -701,31 +743,37 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                 </span>
               </div>
 
-              {/* Acciones Rápidas Derecha: Selector de Velocidad y Botón de Cola/Lista */}
+              {/* Quick Actions Right: Speed Selector & Queue Drawer Button */}
               <div className="flex items-center gap-2 max-w-full justify-end w-full sm:w-auto">
-                {/* Velocidad de Reproducción rápida */}
+                {/* Playback speed selector */}
                 <button
-                  onClick={() => {
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
                     const speeds = [1.0, 1.25, 1.5, 0.8];
                     const cur = playerState.playbackRate || 1.0;
                     const nextIdx = (speeds.indexOf(cur) + 1) % speeds.length;
                     audioEngine.setPlaybackRate(speeds[nextIdx]);
                   }}
                   className="hitbox-48 px-3 py-1.5 rounded-full bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 text-xs font-mono font-bold transition-all flex items-center gap-1 cursor-pointer active:scale-95"
-                  title="Cambiar velocidad de reproducción"
+                  title="Change playback speed"
                 >
                   <span>{playerState.playbackRate || 1.0}x</span>
                 </button>
 
-                {/* Botón de Cola / Lista de Reproducción (Queue / Playlist) */}
+                {/* Queue / Playlist Drawer Button */}
                 <button
-                  onClick={() => setShowQueueDrawer(true)}
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setShowQueueDrawer(true);
+                  }}
                   className="hitbox-48 px-3.5 py-1.5 rounded-full bg-neutral-900 hover:bg-neutral-800 text-neutral-200 hover:text-white border border-neutral-700/80 hover:border-neutral-500 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
-                  title="Ver y seleccionar canción de la cola de reproducción"
-                  aria-label="Lista de reproducción"
+                  title="View and select queue tracks"
+                  aria-label="Queue list"
                 >
                   <ListMusic className="w-4 h-4 text-amber-400" />
-                  <span>Lista ({playerState.queue.length})</span>
+                  <span>Queue ({playerState.queue.length})</span>
                 </button>
               </div>
             </div>
@@ -750,14 +798,18 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
               <div className="flex items-center gap-2">
                 <ListMusic className="w-5 h-5 text-white" />
                 <h3 className="text-sm font-extrabold uppercase tracking-wider text-white">
-                  Cola de Reproducción ({playerState.queue.length})
+                  Queue ({playerState.queue.length})
                 </h3>
               </div>
 
               <button
-                onClick={() => setShowQueueDrawer(false)}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setShowQueueDrawer(false);
+                }}
                 className="hitbox-48 w-9 h-9 rounded-full bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white flex items-center justify-center border border-neutral-700 transition-colors cursor-pointer"
-                title="Cerrar lista"
+                title="Close queue"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -768,7 +820,7 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
               {playerState.queue.length === 0 ? (
                 <div className="py-20 text-center text-neutral-500 space-y-2">
                   <Music2 className="w-10 h-10 mx-auto opacity-40" />
-                  <p className="text-sm">No hay pistas en la cola</p>
+                  <p className="text-sm">No tracks in queue</p>
                 </div>
               ) : (
                 playerState.queue.map((track, idx) => {
@@ -776,7 +828,8 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                   return (
                     <div
                       key={`${track.id}-${idx}`}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.preventDefault();
                         audioEngine.setQueue(playerState.queue, idx, true);
                       }}
                       className={`hitbox-48 w-full p-3 rounded-2xl border transition-all flex items-center justify-between cursor-pointer group ${
@@ -817,7 +870,7 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                           </div>
                         ) : (
                           <span className={`text-xs font-mono ${isCurrent ? 'text-neutral-800' : 'text-neutral-500'}`}>
-                            {formatTime(track.duration)}
+                            {track.duration ? formatTime(track.duration) : '--:--'}
                           </span>
                         )}
                       </div>
@@ -829,12 +882,16 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
 
             {/* Bottom Drawer Action */}
             <div className="pt-3 border-t border-neutral-800 flex items-center justify-between text-xs text-neutral-400 shrink-0">
-              <span>{playerState.queue.length} canciones en cola</span>
+              <span>{playerState.queue.length} tracks in queue</span>
               <button
-                onClick={() => setShowQueueDrawer(false)}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setShowQueueDrawer(false);
+                }}
                 className="px-4 py-1.5 bg-white text-black font-bold uppercase tracking-wider rounded-full text-[11px] hover:bg-neutral-200 cursor-pointer"
               >
-                Listo
+                Done
               </button>
             </div>
           </div>
