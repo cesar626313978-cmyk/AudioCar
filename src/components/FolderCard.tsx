@@ -281,20 +281,24 @@ export const FolderCard: React.FC<FolderCardProps> = ({
         <div className="absolute bottom-3.5 right-3.5 flex items-center gap-2 z-20">
           {folderTracks.length > 1 && onShuffleFolder && (
             <button
+              type="button"
               onClick={(e) => {
+                e.preventDefault();
                 e.stopPropagation();
                 onShuffleFolder(folderTracks);
               }}
               className="hitbox-48 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-black/80 hover:bg-black text-white border border-white/30 backdrop-blur-md shadow-lg active:scale-95 transition-all flex items-center justify-center cursor-pointer"
-              title={`Mezclar aleatorio ${folder.name}`}
-              aria-label="Mezclar aleatorio"
+              title={`Shuffle ${folder.name}`}
+              aria-label="Shuffle folder"
             >
               <Shuffle className="w-5 h-5 text-white" />
             </button>
           )}
 
           <button
+            type="button"
             onClick={(e) => {
+              e.preventDefault();
               e.stopPropagation();
               if (folderTracks.length > 0) {
                 onPlayFolder(folderTracks);
@@ -303,8 +307,8 @@ export const FolderCard: React.FC<FolderCardProps> = ({
               }
             }}
             className="hitbox-56 w-13 h-13 sm:w-14 sm:h-14 rounded-full bg-white hover:bg-neutral-100 text-black shadow-[0_4px_25px_rgba(255,255,255,0.4)] active:scale-95 transition-all flex items-center justify-center cursor-pointer group/btn"
-            title={`Reproducir todas las canciones de ${folder.name}`}
-            aria-label="Reproducir carpeta"
+            title={`Play all songs from ${folder.name}`}
+            aria-label="Play folder"
           >
             <Play className="w-6 h-6 fill-black text-black ml-1 group-hover/btn:scale-110 transition-transform" />
           </button>
@@ -316,10 +320,10 @@ export const FolderCard: React.FC<FolderCardProps> = ({
         <div>
           <div className="flex items-center justify-between gap-2 mb-1">
             <span className={`text-[11px] font-bold uppercase tracking-wider font-mono ${theme.accentText}`}>
-              Carpeta Drive
+              Drive Folder
             </span>
             <span className="text-xs font-mono font-bold text-white bg-neutral-900/90 px-2.5 py-0.5 rounded-full border border-neutral-800 shadow-sm">
-              {folderTracks.length} {folderTracks.length === 1 ? 'pista' : 'pistas'}
+              {folderTracks.length} {folderTracks.length === 1 ? 'track' : 'tracks'}
             </span>
           </div>
 
@@ -334,11 +338,11 @@ export const FolderCard: React.FC<FolderCardProps> = ({
             <span className="truncate">
               {folderTracks.length > 0 
                 ? (folderTracks[0].artist || folderTracks[0].title) 
-                : 'Explorar pistas'}
+                : 'Explore tracks'}
             </span>
           </span>
           <span className="text-[11px] font-bold uppercase text-neutral-400 group-hover:text-white shrink-0 font-mono flex items-center gap-1">
-            <span>Abrir</span>
+            <span>Open</span>
             <span className="group-hover:translate-x-1 transition-transform">→</span>
           </span>
         </div>

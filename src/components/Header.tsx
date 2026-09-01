@@ -100,14 +100,18 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* 2. Reproductor (Grooved Vinyl Record with Blue Play Badge) */}
         <button
-          onClick={onOpenPlayer}
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            onOpenPlayer();
+          }}
           className={`hitbox-48 relative w-12 h-12 sm:w-13 sm:h-13 rounded-full transition-all duration-200 flex items-center justify-center cursor-pointer active:scale-95 group ${
             activeOverlay === 'none'
               ? 'ring-2 ring-amber-400/80 shadow-[0_0_22px_rgba(245,158,11,0.5)] scale-105'
               : 'hover:scale-105 hover:drop-shadow-[0_0_12px_rgba(56,189,248,0.4)]'
           }`}
-          title="Reproductor Principal (Cockpit)"
-          aria-label="Reproductor"
+          title="Main Cockpit Player"
+          aria-label="Player"
         >
           <SkeuomorphicVinylIcon 
             isActive={activeOverlay === 'none'} 
@@ -117,14 +121,18 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* 3. Biblioteca (Golden Folder with Music Notes) */}
         <button
-          onClick={onOpenLibrary}
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            onOpenLibrary();
+          }}
           className={`hitbox-48 relative w-12 h-12 sm:w-13 sm:h-13 rounded-full transition-all duration-200 flex items-center justify-center cursor-pointer active:scale-95 group ${
             activeOverlay === 'library'
               ? 'ring-2 ring-amber-400/80 shadow-[0_0_22px_rgba(245,158,11,0.5)] scale-105'
               : 'hover:scale-105 hover:drop-shadow-[0_0_12px_rgba(234,179,8,0.4)]'
           }`}
-          title="Biblioteca de Música y Carpetas"
-          aria-label="Biblioteca"
+          title="Music Library & Drive Folders"
+          aria-label="Library"
         >
           <SkeuomorphicFolderIcon 
             isActive={activeOverlay === 'library'} 
@@ -133,14 +141,18 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* 4. Ecualizador DSP (Golden Mixer Sliders) */}
         <button
-          onClick={onOpenSettings}
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            onOpenSettings();
+          }}
           className={`hitbox-48 relative w-12 h-12 sm:w-13 sm:h-13 rounded-full transition-all duration-200 flex items-center justify-center cursor-pointer active:scale-95 group ${
             activeOverlay === 'settings'
               ? 'ring-2 ring-amber-400/80 shadow-[0_0_22px_rgba(245,158,11,0.5)] scale-105'
               : 'hover:scale-105 hover:drop-shadow-[0_0_12px_rgba(234,179,8,0.4)]'
           }`}
-          title="Ecualizador DSP y Ajustes de Audio"
-          aria-label="Ajustes y Ecualizador"
+          title="DSP Equalizer & Audio Settings"
+          aria-label="Settings and Equalizer"
         >
           <SkeuomorphicEqualizerIcon 
             isActive={activeOverlay === 'settings'} 
@@ -149,10 +161,14 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* 5. Tema / Ambiente (Golden Sun Face & Crescent Moon) */}
         <button
-          onClick={toggleTheme}
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            toggleTheme();
+          }}
           className="hitbox-48 relative w-12 h-12 sm:w-13 sm:h-13 rounded-full transition-all duration-200 flex items-center justify-center cursor-pointer active:scale-95 group hover:scale-105 hover:drop-shadow-[0_0_12px_rgba(245,158,11,0.4)]"
-          title={theme === 'dark' ? 'Modo Día (Brillo Alto)' : 'Modo Noche (Ambiente Oscuro)'}
-          aria-label={theme === 'dark' ? 'Modo Día' : 'Modo Noche'}
+          title={theme === 'dark' ? 'Day Cockpit Theme' : 'Night Dark Theme'}
+          aria-label={theme === 'dark' ? 'Day Mode' : 'Night Mode'}
         >
           <SkeuomorphicSunMoonIcon 
             isActive={false} 
@@ -161,14 +177,18 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* 6. Un Café (Vintage Porcelain Espresso Cup with Gold Steam) */}
         <button
-          onClick={onOpenDonation}
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            onOpenDonation();
+          }}
           className={`hitbox-48 relative w-12 h-12 sm:w-13 sm:h-13 rounded-full transition-all duration-200 flex items-center justify-center cursor-pointer active:scale-95 group ${
             activeOverlay === 'donation'
               ? 'ring-2 ring-amber-400/80 shadow-[0_0_22px_rgba(245,158,11,0.5)] scale-105'
               : 'hover:scale-105 hover:drop-shadow-[0_0_12px_rgba(245,158,11,0.4)]'
           }`}
-          title="Invitar a un Café (Apoyo al Proyecto)"
-          aria-label="Invitar a un café"
+          title="Buy Me a Coffee (Support)"
+          aria-label="Buy me a coffee"
         >
           <SkeuomorphicCoffeeIcon 
             isActive={activeOverlay === 'donation'} 
@@ -177,14 +197,18 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* 7. Contacto y Feedback (Glowing Cyan Glass Heart with Silhouette) */}
         <button
-          onClick={onOpenContact}
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            onOpenContact();
+          }}
           className={`hitbox-48 relative w-12 h-12 sm:w-13 sm:h-13 rounded-full transition-all duration-200 flex items-center justify-center cursor-pointer active:scale-95 group ${
             activeOverlay === 'contact'
               ? 'ring-2 ring-amber-400/80 shadow-[0_0_22px_rgba(245,158,11,0.5)] scale-105'
               : 'hover:scale-105 hover:drop-shadow-[0_0_12px_rgba(56,189,248,0.4)]'
           }`}
-          title="Sugerencias, Soporte Técnico y Contacto"
-          aria-label="Contacto y Soporte"
+          title="Suggestions, Support & Contact"
+          aria-label="Contact and Support"
         >
           <SkeuomorphicHeartIcon 
             isActive={activeOverlay === 'contact'} 

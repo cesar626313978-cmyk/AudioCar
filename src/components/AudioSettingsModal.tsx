@@ -834,18 +834,22 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
           <div>
             <div className="text-xs font-bold text-white flex items-center gap-1.5">
               <Database className="w-4 h-4 text-neutral-400" />
-              <span>Almacenamiento Local IndexedDB</span>
+              <span>Local Storage & IndexedDB</span>
             </div>
             <div className="text-xs text-neutral-400">
-              Caché offline de pistas, metadatos, carátulas y playlists
+              Offline cache for tracks, metadata, album art and playlists
             </div>
           </div>
 
           <button
-            onClick={handleClearCache}
-            className="hitbox-48 px-4 py-2 rounded-full bg-neutral-900 hover:bg-neutral-800 text-xs font-bold uppercase tracking-wider text-neutral-300 hover:text-white border border-neutral-700 transition-colors"
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              handleClearCache();
+            }}
+            className="hitbox-48 px-4 py-2 rounded-full bg-neutral-900 hover:bg-neutral-800 text-xs font-bold uppercase tracking-wider text-neutral-300 hover:text-white border border-neutral-700 transition-colors cursor-pointer"
           >
-            {clearedCacheMsg ? '¡Caché Limpiada!' : 'Limpiar Caché'}
+            {clearedCacheMsg ? 'Cache Cleared!' : 'Clear Cache'}
           </button>
         </div>
       </div>
@@ -854,16 +858,21 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
       <div className="p-4 sm:p-5 border-t border-neutral-800/90 bg-neutral-950/95 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2 text-xs text-neutral-400">
           <Check className="w-4 h-4 text-emerald-400" />
-          <span className="hidden sm:inline">Los ajustes se aplican en tiempo real al reproductor.</span>
-          <span className="sm:hidden">Ajustes activos</span>
+          <span className="hidden sm:inline">Settings apply in real time to the player.</span>
+          <span className="sm:hidden">Settings active</span>
         </div>
 
         <button
-          onClick={onClose}
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onClose();
+          }}
           className="hitbox-56 px-8 py-3 rounded-2xl bg-white hover:bg-neutral-200 active:scale-95 text-black font-extrabold text-xs sm:text-sm uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-lg hover:shadow-white/20"
         >
           <Check className="w-4 h-4 text-black stroke-[3]" />
-          <span>Guardar y Cerrar</span>
+          <span>Save & Close</span>
         </button>
       </div>
     </div>

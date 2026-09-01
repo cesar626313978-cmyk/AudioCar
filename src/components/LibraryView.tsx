@@ -425,9 +425,10 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
                         {/* Favorite Button */}
                         <button
+                          type="button"
                           onClick={(e) => toggleFavorite(e, track.id)}
                           className="hitbox-48 w-9 h-9 md:w-10 md:h-10 rounded-full text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors flex items-center justify-center cursor-pointer"
-                          title="Favorito"
+                          title="Favorite"
                         >
                           <Heart
                             className={`w-4 h-4 md:w-5 md:h-5 ${
@@ -439,9 +440,10 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                         {/* Delete individual DEMO track */}
                         {isDemo && onDeleteTrack && (
                           <button
+                            type="button"
                             onClick={(e) => handleDeleteSingleTrack(e, track.id)}
                             className="hitbox-48 w-9 h-9 md:w-10 md:h-10 rounded-full text-neutral-500 hover:text-red-400 hover:bg-neutral-800 transition-colors flex items-center justify-center cursor-pointer"
-                            title="Eliminar pista DEMO"
+                            title="Delete DEMO track"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>

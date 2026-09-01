@@ -22,7 +22,14 @@
     color: #ffffff;
     -webkit-tap-highlight-color: transparent;
     user-select: none;
-    overscroll-behavior-y: none;
+    -webkit-user-select: none;
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
+  button, [role="button"], a {
+    touch-action: manipulation;
+    -webkit-touch-callout: none;
   }
 }
 

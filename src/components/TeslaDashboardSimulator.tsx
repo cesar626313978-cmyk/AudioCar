@@ -582,35 +582,47 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
             <div className="flex items-center justify-between max-w-lg mx-auto w-full px-2 sm:px-4">
               {/* Shuffle / Aleatorio */}
               <button
-                onClick={() => audioEngine.toggleShuffle()}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  audioEngine.toggleShuffle();
+                }}
                 className={`hitbox-48 w-12 h-12 sm:w-13 sm:h-13 rounded-full transition-all flex items-center justify-center border cursor-pointer active:scale-95 ${
                   playerState.playbackMode === 'shuffle'
                     ? 'bg-white text-black border-white shadow-lg shadow-white/10 font-bold'
                     : 'bg-neutral-900 border-neutral-700/80 text-neutral-300 hover:text-white hover:border-neutral-500'
                 }`}
-                title={playerState.playbackMode === 'shuffle' ? 'Modo Aleatorio Activo' : 'Activar Modo Aleatorio (Shuffle)'}
-                aria-label="Aleatorio"
+                title={playerState.playbackMode === 'shuffle' ? 'Shuffle Active' : 'Enable Shuffle'}
+                aria-label="Shuffle"
               >
                 <Shuffle className="w-5 h-5" />
               </button>
 
               {/* Previous Track */}
               <button
-                onClick={() => audioEngine.previous()}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  audioEngine.previous();
+                }}
                 className="hitbox-56 w-13 h-13 sm:w-15 sm:h-15 rounded-full flex items-center justify-center text-neutral-300 hover:text-white active:scale-90 transition-all cursor-pointer hover:bg-neutral-900/60"
-                title="Pista anterior"
-                aria-label="Pista anterior"
+                title="Previous track"
+                aria-label="Previous track"
               >
                 <SkipBack className="w-7 h-7 sm:w-8 sm:h-8 fill-current" />
               </button>
 
               {/* MAIN PLAY / PAUSE BUTTON */}
               <button
-                onClick={() => audioEngine.togglePlay()}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  audioEngine.togglePlay();
+                }}
                 disabled={playerState.queue.length === 0}
                 className="hitbox-64 w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-white hover:bg-neutral-200 active:scale-95 text-black shadow-[0_0_35px_rgba(255,255,255,0.25)] transition-all flex items-center justify-center cursor-pointer disabled:opacity-50 shrink-0 mx-1 sm:mx-2"
-                title={playerState.isPlaying ? 'Pausar' : 'Reproducir'}
-                aria-label={playerState.isPlaying ? 'Pausar' : 'Reproducir'}
+                title={playerState.isPlaying ? 'Pause' : 'Play'}
+                aria-label={playerState.isPlaying ? 'Pause' : 'Play'}
               >
                 {playerState.isPlaying ? (
                   <Pause className="w-8 h-8 sm:w-9 sm:h-9 fill-black" />
@@ -621,24 +633,32 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
 
               {/* Next Track */}
               <button
-                onClick={() => audioEngine.next()}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  audioEngine.next();
+                }}
                 className="hitbox-56 w-13 h-13 sm:w-15 sm:h-15 rounded-full flex items-center justify-center text-neutral-300 hover:text-white active:scale-90 transition-all cursor-pointer hover:bg-neutral-900/60"
-                title="Siguiente pista"
-                aria-label="Siguiente pista"
+                title="Next track"
+                aria-label="Next track"
               >
                 <SkipForward className="w-7 h-7 sm:w-8 sm:h-8 fill-current" />
               </button>
 
               {/* Repeat Mode Cycle (Lineal -> Continuo -> Repetir 1) */}
               <button
-                onClick={() => audioEngine.cycleRepeatMode()}
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  audioEngine.cycleRepeatMode();
+                }}
                 className={`hitbox-48 w-12 h-12 sm:w-13 sm:h-13 rounded-full transition-all flex items-center justify-center border cursor-pointer active:scale-95 ${
                   playerState.playbackMode === 'continuous' || playerState.playbackMode === 'repeat_one'
                     ? 'bg-white text-black border-white shadow-lg shadow-white/10 font-bold'
                     : 'bg-neutral-900 border-neutral-700/80 text-neutral-300 hover:text-white hover:border-neutral-500'
                 }`}
-                title={`Modo de Repetición: ${playerState.playbackMode === 'repeat_one' ? 'Repetir 1 Canción' : playerState.playbackMode === 'continuous' ? 'Repetir Toda la Lista' : 'Sin Repetición'}`}
-                aria-label="Modo de Repetición"
+                title={`Repeat Mode: ${playerState.playbackMode === 'repeat_one' ? 'Repeat Track' : playerState.playbackMode === 'continuous' ? 'Repeat All' : 'Off'}`}
+                aria-label="Repeat Mode"
               >
                 {playerState.playbackMode === 'repeat_one' ? (
                   <Repeat1 className="w-5 h-5 stroke-[2.5]" />
