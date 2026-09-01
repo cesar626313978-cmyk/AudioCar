@@ -21,6 +21,9 @@ interface HeaderProps {
   user: DriveAuthUser | null;
   activeOverlay: 'none' | 'library' | 'settings' | 'auth' | 'donation' | 'contact' | 'help';
   isPlaying?: boolean;
+  isSyncing?: boolean;
+  syncPercent?: number;
+  syncStep?: string;
   onOpenPlayer: () => void;
   onOpenLibrary: () => void;
   onOpenSettings: () => void;
@@ -36,6 +39,9 @@ export const Header: React.FC<HeaderProps> = ({
   user,
   activeOverlay,
   isPlaying = false,
+  isSyncing = false,
+  syncPercent = 0,
+  syncStep = '',
   onOpenPlayer,
   onOpenLibrary,
   onOpenSettings,
@@ -200,6 +206,29 @@ export const Header: React.FC<HeaderProps> = ({
             isActive={activeOverlay === 'help'} 
           />
         </button>
+
+        {/* Real-Time Cloud Sync Progress Pill (Visible during Google Drive sync) */}
+        {isSyncing && (
+          <div 
+            onClick={onOpenAuth}
+            className="flex items-center gap-2.5 bg-neutral-900/90 hover:bg-neutral-800 border border-amber-500/40 rounded-full px-3.5 py-1.5 shadow-lg shadow-amber-500/10 cursor-pointer animate-in fade-in zoom-in-95 duration-200 shrink-0 ml-2"
+            title={syncStep || 'Sincronizando biblioteca con Google Drive...'}
+          >
+            <div className="w-4 h-4 rounded-full border-2 border-amber-400 border-t-transparent animate-spin shrink-0" />
+            <div className="flex flex-col max-w-[160px] sm:max-w-[220px]">
+              <div className="flex items-center justify-between text-[11px] font-bold text-amber-400">
+                <span className="truncate">{syncStep || 'Sincronizando...'}</span>
+                <span className="font-mono ml-1.5">{syncPercent}%</span>
+              </div>
+              <div className="w-full bg-neutral-800 rounded-full h-1 mt-0.5 overflow-hidden">
+                <div 
+                  className="bg-gradient-to-r from-amber-500 to-amber-300 h-full rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${Math.max(5, syncPercent)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
 
 
       </nav>

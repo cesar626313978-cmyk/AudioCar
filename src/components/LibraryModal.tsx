@@ -11,6 +11,9 @@ interface LibraryModalProps {
   currentTrackId?: string;
   onRefreshDrive: () => Promise<void>;
   isLoading: boolean;
+  isSyncing?: boolean;
+  syncPercent?: number;
+  syncStep?: string;
   onDeleteDemoTracks?: () => void;
   onRestoreDemoTracks?: () => void;
   onDeleteTrack?: (trackId: string) => void;
@@ -23,6 +26,9 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
   currentTrackId,
   onRefreshDrive,
   isLoading,
+  isSyncing = false,
+  syncPercent = 0,
+  syncStep = '',
   onDeleteDemoTracks,
   onRestoreDemoTracks,
   onDeleteTrack,
@@ -106,6 +112,34 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Real-time Cloud Sync Progress Bar (if actively importing/syncing) */}
+      {isSyncing && (
+        <div className="bg-amber-950/40 border-b border-amber-500/30 px-4 py-2.5 flex items-center justify-between gap-4 animate-in slide-in-from-top-2 duration-200 shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-4 h-4 rounded-full border-2 border-amber-400 border-t-transparent animate-spin shrink-0" />
+            <div className="flex flex-col min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-amber-400 truncate">
+                  {syncStep || 'Importando canciones de Google Drive (/mimusica)...'}
+                </span>
+                <span className="text-xs font-mono font-black text-amber-300 bg-amber-900/60 px-2 py-0.5 rounded-full border border-amber-500/40 shrink-0">
+                  {syncPercent}%
+                </span>
+              </div>
+              <div className="w-48 sm:w-80 max-w-full bg-neutral-900 rounded-full h-1.5 mt-1 overflow-hidden border border-neutral-800">
+                <div 
+                  className="bg-gradient-to-r from-amber-500 via-amber-400 to-amber-200 h-full rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${Math.max(6, syncPercent)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+          <span className="text-[11px] text-amber-300/80 font-medium hidden sm:inline shrink-0">
+            Buscando audio y carátulas...
+          </span>
+        </div>
+      )}
 
       {/* Main Content Area (Scrollable) */}
       <div className="flex-1 overflow-y-auto custom-scrollbar p-2 sm:p-4">

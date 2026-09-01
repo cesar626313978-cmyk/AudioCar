@@ -32,6 +32,8 @@ export function App() {
   const [tracks, setTracks] = useState<AudioTrack[]>([]);
   const [folders, setFolders] = useState<DriveFolder[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [syncProgressPercent, setSyncProgressPercent] = useState<number>(0);
+  const [syncProgressStep, setSyncProgressStep] = useState<string>('');
   const [activeOverlay, setActiveOverlay] = useState<ActiveOverlay>('none');
   const [syncNotice, setSyncNotice] = useState<{
     isOpen: boolean;
@@ -174,8 +176,13 @@ export function App() {
 
   const syncCloudContent = async (isManual: boolean = false) => {
     setIsLoading(true);
+    setSyncProgressPercent(10);
+    setSyncProgressStep('Conectando con Google Drive...');
     try {
-      const syncResult = await cloudService.syncLibraryDetailed();
+      const syncResult = await cloudService.syncLibraryDetailed(undefined, (progress) => {
+        setSyncProgressPercent(progress.percent);
+        setSyncProgressStep(progress.step);
+      });
       const hideDemoTracks = await dbService.isDemoTracksHidden();
 
       if (isManual) {
@@ -233,6 +240,10 @@ export function App() {
       console.warn('Error syncing cloud content:', err);
     } finally {
       setIsLoading(false);
+      setTimeout(() => {
+        setSyncProgressPercent(0);
+        setSyncProgressStep('');
+      }, 1200);
     }
   };
 
@@ -288,6 +299,9 @@ export function App() {
         user={user}
         activeOverlay={activeOverlay}
         isPlaying={playerState.isPlaying}
+        isSyncing={isLoading}
+        syncPercent={syncProgressPercent}
+        syncStep={syncProgressStep}
         onOpenPlayer={() => setActiveOverlay('none')}
         onOpenLibrary={() => setActiveOverlay('library')}
         onOpenSettings={() => setActiveOverlay('settings')}
@@ -316,6 +330,9 @@ export function App() {
           currentTrackId={audioEngine.getCurrentTrack()?.id}
           onRefreshDrive={() => syncCloudContent(true)}
           isLoading={isLoading}
+          isSyncing={isLoading}
+          syncPercent={syncProgressPercent}
+          syncStep={syncProgressStep}
           onDeleteDemoTracks={handleDeleteDemoTracks}
           onRestoreDemoTracks={handleRestoreDemoTracks}
           onDeleteTrack={handleDeleteSingleTrack}
