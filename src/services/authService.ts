@@ -48,28 +48,55 @@ class AuthService {
   private tokenClient: any = null;
   private listeners: Set<AuthListener> = new Set();
   private isSigningIn = false;
+  private isRefreshingToken = false;
   private pendingAuthResolve: ((user: DriveAuthUser) => void) | null = null;
   private pendingAuthReject: ((err: any) => void) | null = null;
+  private autoRefreshTimer: any = null;
 
   constructor() {
     this.loadPersistedSession();
     this.setupFirebaseListener();
+    this.startAutoRefreshLoop();
   }
 
   private setupFirebaseListener() {
     onAuthStateChanged(auth, (firebaseUser: User | null) => {
-      if (!firebaseUser) {
-        if (!this.currentUser?.isManual) {
-          // Keep current user only if valid persisted session with token exists
-          const current = this.getUser();
-          if (!current) {
-            this.currentUser = null;
-            localStorage.removeItem(AUTH_STORAGE_KEY);
-            this.notifyListeners();
-          }
-        }
+      if (!firebaseUser && !this.currentUser) {
+        this.notifyListeners();
       }
     });
+  }
+
+  private startAutoRefreshLoop() {
+    if (this.autoRefreshTimer) {
+      clearInterval(this.autoRefreshTimer);
+    }
+    // Check every 5 minutes if token is expiring in less than 15 minutes
+    this.autoRefreshTimer = setInterval(() => {
+      this.checkAndRefreshSilently();
+    }, 5 * 60 * 1000);
+
+    // Also check on window focus/visibility
+    if (typeof window !== 'undefined') {
+      window.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          this.checkAndRefreshSilently();
+        }
+      });
+    }
+  }
+
+  private async checkAndRefreshSilently() {
+    if (!this.currentUser || this.currentUser.isManual || this.isRefreshingToken) return;
+
+    const timeRemaining = this.currentUser.expiresAt - Date.now();
+    // Refresh proactively if less than 15 minutes left or already expired
+    if (timeRemaining < 15 * 60 * 1000) {
+      console.log(`[AuthService] Token expiring in ${Math.round(timeRemaining / 60000)} min. Triggering silent refresh...`);
+      await this.refreshAccessTokenSilently().catch((e) => {
+        console.warn('[AuthService] Proactive silent refresh notice:', e);
+      });
+    }
   }
 
   private loadPersistedSession() {
@@ -77,11 +104,13 @@ class AuthService {
       const stored = localStorage.getItem(AUTH_STORAGE_KEY);
       if (stored) {
         const user = JSON.parse(stored) as DriveAuthUser & { isManual?: boolean };
-        if (user.expiresAt && user.expiresAt > Date.now()) {
+        if (user && user.email) {
+          // Retain user identity even across browser sessions and offline driving
           this.currentUser = user;
-        } else {
-          localStorage.removeItem(AUTH_STORAGE_KEY);
-          this.currentUser = null;
+          // If token has expired, trigger background refresh when GIS is ready
+          if (!user.expiresAt || user.expiresAt <= Date.now()) {
+            setTimeout(() => this.checkAndRefreshSilently(), 1500);
+          }
         }
       }
     } catch (e) {
@@ -101,6 +130,81 @@ class AuthService {
       localStorage.removeItem(CLIENT_ID_KEY);
     }
     this.tokenClient = null;
+  }
+
+  /**
+   * Silent background token refresh using Google Identity Services (prompt: '')
+   * Renews access token seamlessly without opening popups or interrupting audio.
+   */
+  public async refreshAccessTokenSilently(): Promise<string | null> {
+    if (this.isRefreshingToken) {
+      // If already in progress, wait for completion
+      return new Promise((resolve) => {
+        const checkInterval = setInterval(() => {
+          if (!this.isRefreshingToken) {
+            clearInterval(checkInterval);
+            resolve(this.currentUser?.accessToken || null);
+          }
+        }, 300);
+      });
+    }
+
+    if (typeof window === 'undefined' || !window.google?.accounts?.oauth2) {
+      return this.currentUser?.accessToken || null;
+    }
+
+    const current = this.currentUser;
+    if (!current || current.isManual) {
+      return current?.accessToken || null;
+    }
+
+    this.isRefreshingToken = true;
+
+    try {
+      return await new Promise<string | null>((resolve) => {
+        const clientId = this.getClientId();
+        const silentClient = window.google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: SCOPES.join(' '),
+          prompt: '', // Silent refresh without popup or account picker
+          hint: current.email || undefined,
+          callback: async (tokenResponse: any) => {
+            this.isRefreshingToken = false;
+            if (tokenResponse && tokenResponse.access_token) {
+              const expiresInSec = tokenResponse.expires_in || 3600;
+              const expiresAt = Date.now() + expiresInSec * 1000 - 60000;
+
+              const updatedUser: DriveAuthUser = {
+                ...current,
+                accessToken: tokenResponse.access_token,
+                expiresAt
+              };
+
+              this.currentUser = updatedUser;
+              localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updatedUser));
+              this.notifyListeners();
+              console.log('[AuthService] Silent token refresh succeeded. Valid for', Math.round(expiresInSec / 60), 'min.');
+              resolve(tokenResponse.access_token);
+            } else {
+              console.warn('[AuthService] Silent refresh received no token:', tokenResponse?.error);
+              resolve(this.currentUser?.accessToken || null);
+            }
+          },
+          error_callback: (err: any) => {
+            this.isRefreshingToken = false;
+            console.warn('[AuthService] Silent token refresh error (offline or consent needed):', err);
+            // Keep existing token so offline/cached audio keeps playing without disconnect screen
+            resolve(this.currentUser?.accessToken || null);
+          }
+        });
+
+        silentClient.requestAccessToken({ prompt: '' });
+      });
+    } catch (err) {
+      this.isRefreshingToken = false;
+      console.warn('[AuthService] Failed to execute silent refresh:', err);
+      return this.currentUser?.accessToken || null;
+    }
   }
 
   /**
@@ -306,7 +410,11 @@ class AuthService {
   }
 
   public getUser(): DriveAuthUser | null {
-    if (this.currentUser && this.currentUser.expiresAt > Date.now()) {
+    if (this.currentUser) {
+      // If expired or about to expire, trigger background refresh
+      if (this.currentUser.expiresAt && this.currentUser.expiresAt <= Date.now() + 10 * 60 * 1000) {
+        this.checkAndRefreshSilently().catch(() => {});
+      }
       return this.currentUser;
     }
     return null;
@@ -315,6 +423,14 @@ class AuthService {
   public getAccessToken(): string | null {
     const user = this.getUser();
     return user ? user.accessToken : null;
+  }
+
+  public async getValidAccessToken(): Promise<string | null> {
+    if (!this.currentUser) return null;
+    if (this.currentUser.expiresAt && this.currentUser.expiresAt <= Date.now() + 5 * 60 * 1000) {
+      await this.refreshAccessTokenSilently().catch(() => {});
+    }
+    return this.currentUser?.accessToken || null;
   }
 
   public subscribe(listener: AuthListener): () => void {

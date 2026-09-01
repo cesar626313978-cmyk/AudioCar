@@ -247,77 +247,77 @@ export const AlbumArtwork: React.FC<AlbumArtworkProps> = ({
         boxShadow: !activeImage ? `0 4px 16px -4px ${theme.glow}` : undefined
       }}
     >
-      {activeImage ? (
+      {/* 1. Stable Base Layer: Dynamic Colorful Vinyl Artwork (Always rendered as fallback and smooth underlay) */}
+      <div
+        className={`w-full h-full bg-gradient-to-br ${theme.bg} flex flex-col items-center justify-center p-1 relative overflow-hidden border ${theme.ring} shadow-inner`}
+      >
+        {/* Subtle Concentric Vinyl Grooves Pattern */}
+        <div
+          className="absolute inset-0 opacity-25 pointer-events-none"
+          style={{
+            backgroundImage:
+              'radial-gradient(circle, transparent 20%, rgba(255,255,255,0.18) 21%, transparent 22%, transparent 45%, rgba(255,255,255,0.18) 46%, transparent 47%, transparent 70%, rgba(255,255,255,0.18) 71%, transparent 72%)'
+          }}
+        />
+
+        {/* Central Mini-Vinyl Disc */}
+        <div className="relative z-10 flex flex-col items-center justify-center">
+          <div
+            className={`rounded-full ${theme.center} border border-white/40 flex items-center justify-center shadow-lg transition-transform ${
+              isPlaying ? 'animate-spin [animation-duration:10s]' : ''
+            } ${
+              size === 'xs'
+                ? 'w-5 h-5'
+                : size === 'sm'
+                ? 'w-7 h-7'
+                : size === 'md'
+                ? 'w-10 h-10 sm:w-11 sm:h-11'
+                : size === 'lg'
+                ? 'w-16 h-16'
+                : size === 'xl'
+                ? 'w-24 h-24'
+                : 'w-10 h-10'
+            }`}
+          >
+            <span
+              className={`font-mono font-black tracking-wider text-white drop-shadow-md ${
+                size === 'xs'
+                  ? 'text-[7px]'
+                  : size === 'sm'
+                  ? 'text-[9px]'
+                  : size === 'md'
+                  ? 'text-xs'
+                  : size === 'lg'
+                  ? 'text-base'
+                  : size === 'xl'
+                  ? 'text-2xl'
+                  : 'text-xs'
+              }`}
+            >
+              {initials}
+            </span>
+          </div>
+
+          {/* Micro Music Note Icon (for sizes md and up) */}
+          {size !== 'xs' && size !== 'sm' && (
+            <Music className={`w-2.5 h-2.5 ${theme.text} mt-0.5 opacity-90 drop-shadow`} />
+          )}
+        </div>
+      </div>
+
+      {/* 2. Seamless Image Overlay: Smoothly fades in without screen flashes or DOM tearing */}
+      {activeImage && (
         <img
-          key={activeImage}
           src={activeImage}
           alt={`${trackTitle} - ${trackArtist}`}
           referrerPolicy="no-referrer"
           decoding="async"
           onLoad={() => setIsImgLoaded(true)}
-          className={`w-full h-full object-cover shadow-inner transition-opacity duration-300 ${
+          className={`absolute inset-0 w-full h-full object-cover shadow-inner transition-opacity duration-300 ${
             isImgLoaded ? 'opacity-100' : 'opacity-0'
           }`}
           onError={() => setHasError(true)}
         />
-      ) : (
-        /* Dynamic Colorful Vinyl Artwork for Tracks */
-        <div
-          className={`w-full h-full bg-gradient-to-br ${theme.bg} flex flex-col items-center justify-center p-1 relative overflow-hidden border ${theme.ring} shadow-inner`}
-        >
-          {/* Subtle Concentric Vinyl Grooves Pattern */}
-          <div
-            className="absolute inset-0 opacity-25 pointer-events-none"
-            style={{
-              backgroundImage:
-                'radial-gradient(circle, transparent 20%, rgba(255,255,255,0.18) 21%, transparent 22%, transparent 45%, rgba(255,255,255,0.18) 46%, transparent 47%, transparent 70%, rgba(255,255,255,0.18) 71%, transparent 72%)'
-            }}
-          />
-
-          {/* Central Mini-Vinyl Disc */}
-          <div className="relative z-10 flex flex-col items-center justify-center">
-            <div
-              className={`rounded-full ${theme.center} border border-white/40 flex items-center justify-center shadow-lg transition-transform ${
-                isPlaying ? 'animate-spin [animation-duration:10s]' : ''
-              } ${
-                size === 'xs'
-                  ? 'w-5 h-5'
-                  : size === 'sm'
-                  ? 'w-7 h-7'
-                  : size === 'md'
-                  ? 'w-10 h-10 sm:w-11 sm:h-11'
-                  : size === 'lg'
-                  ? 'w-16 h-16'
-                  : size === 'xl'
-                  ? 'w-24 h-24'
-                  : 'w-10 h-10'
-              }`}
-            >
-              <span
-                className={`font-mono font-black tracking-wider text-white drop-shadow-md ${
-                  size === 'xs'
-                    ? 'text-[7px]'
-                    : size === 'sm'
-                    ? 'text-[9px]'
-                    : size === 'md'
-                    ? 'text-xs'
-                    : size === 'lg'
-                    ? 'text-base'
-                    : size === 'xl'
-                    ? 'text-2xl'
-                    : 'text-xs'
-                }`}
-              >
-                {initials}
-              </span>
-            </div>
-
-            {/* Micro Music Note Icon (for sizes md and up) */}
-            {size !== 'xs' && size !== 'sm' && (
-              <Music className={`w-2.5 h-2.5 ${theme.text} mt-0.5 opacity-90 drop-shadow`} />
-            )}
-          </div>
-        </div>
       )}
 
       {/* Format Badge (JPG / PNG / GIF / WEBP) */}

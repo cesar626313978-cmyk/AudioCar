@@ -26,17 +26,5 @@
   <body class="bg-black text-white antialiased select-none touch-manipulation overflow-x-hidden font-sans">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then((reg) => {
-              // Check for update on load
-              reg.update();
-            })
-            .catch(() => {});
-        });
-      }
-    </script>
   </body>
 </html>

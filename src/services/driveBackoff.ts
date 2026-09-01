@@ -132,6 +132,23 @@ export async function fetchWithDriveBackoff(
         return response;
       }
 
+      // Handle token expiration (HTTP 401) by silently refreshing and retrying once
+      if (response.status === 401 && attempt === 0) {
+        try {
+          const { authService } = await import('./authService');
+          const newToken = await authService.refreshAccessTokenSilently();
+          if (newToken && init) {
+            const currentHeaders = new Headers(init.headers || {});
+            currentHeaders.set('Authorization', `Bearer ${newToken}`);
+            init = { ...init, headers: currentHeaders };
+            console.log('[Drive Backoff] HTTP 401 detected: silently refreshed token and retrying request seamlessly.');
+            continue;
+          }
+        } catch (authErr) {
+          console.warn('[Drive Backoff] Token refresh on 401 failed:', authErr);
+        }
+      }
+
       const { retryable, reason } = await isDriveRateLimitOrRetryable(response);
 
       if (retryable && attempt < maxRetries) {

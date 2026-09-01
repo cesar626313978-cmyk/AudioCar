@@ -88,6 +88,7 @@ class AudioEngine {
   private lazyPrefetchTimer: any = null;
   private hasTriggeredLazyPrefetch = false;
   private fadeOutTimer: any = null;
+  private lastSessionPersistTime = 0;
 
   constructor() {
     this.audioA = new Audio();
@@ -336,7 +337,6 @@ class AudioEngine {
         }
 
         // Lazy Buffering Guard: Start prefetching only after user has listened for >= 10s or 25% of track
-        // Prevents rapid skipping from burning 4G/5G mobile cellular data
         if (
           !this.hasTriggeredLazyPrefetch &&
           (audioEl.currentTime >= 10 || (audioEl.duration > 0 && audioEl.currentTime >= audioEl.duration * 0.25))
@@ -357,12 +357,9 @@ class AudioEngine {
         }
 
         this.notifyListeners();
-        this.updateMediaSessionPosition();
         
-        // Save session state periodically during playback
-        if (Math.floor(audioEl.currentTime) % 3 === 0) {
-          this.persistCurrentSessionState();
-        }
+        // Save session state smoothly at throttled intervals
+        this.persistCurrentSessionState();
       }
     });
 
@@ -451,22 +448,29 @@ class AudioEngine {
   private updateMediaSessionMetadata(track: AudioTrack) {
     if (typeof window === 'undefined' || !('mediaSession' in navigator)) return;
 
-    const baseArt = track.thumbnailUrl || '/audiocar-logo.svg';
-    const artwork = [
-      { src: baseArt, sizes: '96x96', type: 'image/jpeg' },
-      { src: baseArt, sizes: '128x128', type: 'image/jpeg' },
-      { src: baseArt, sizes: '192x192', type: 'image/jpeg' },
-      { src: baseArt, sizes: '256x256', type: 'image/jpeg' },
-      { src: baseArt, sizes: '384x384', type: 'image/jpeg' },
-      { src: baseArt, sizes: '512x512', type: 'image/jpeg' }
-    ];
+    try {
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const baseArt = track.thumbnailUrl || (origin ? `${origin}/audiocar-logo.svg` : '/audiocar-logo.svg');
+      const isSvg = baseArt.includes('.svg');
+      const artType = isSvg ? 'image/svg+xml' : 'image/jpeg';
+      const artwork = [
+        { src: baseArt, sizes: '96x96', type: artType },
+        { src: baseArt, sizes: '128x128', type: artType },
+        { src: baseArt, sizes: '192x192', type: artType },
+        { src: baseArt, sizes: '256x256', type: artType },
+        { src: baseArt, sizes: '384x384', type: artType },
+        { src: baseArt, sizes: '512x512', type: artType }
+      ];
 
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: track.title || track.name,
-      artist: track.artist || 'AudioCar',
-      album: track.album || 'Google Drive Cloud',
-      artwork
-    });
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: track.title || track.name,
+        artist: track.artist || 'AudioCar',
+        album: track.album || 'Google Drive Cloud',
+        artwork
+      });
+    } catch (e) {
+      console.warn('Failed to update MediaSession metadata:', e);
+    }
 
     this.updateMediaSessionPosition();
   }
@@ -474,12 +478,12 @@ class AudioEngine {
   private startMediaSessionPositionSync() {
     this.stopMediaSessionPositionSync();
     this.updateMediaSessionPosition();
-    // 300ms interval Keep-Alive to prevent mobile OS Garbage Collection / thread sleeping
+    // 1000ms interval Keep-Alive to prevent car browser daemon flooding
     this.mediaSessionSyncInterval = setInterval(() => {
       if (this.state.isPlaying && !this.activeAudio.paused) {
         this.updateMediaSessionPosition();
       }
-    }, 300);
+    }, 1000);
   }
 
   private stopMediaSessionPositionSync() {
@@ -498,10 +502,12 @@ class AudioEngine {
       this.activeAudio.duration > 0
     ) {
       try {
+        const safeDuration = Math.max(0.1, this.activeAudio.duration);
+        const safePos = Math.min(Math.max(0, this.activeAudio.currentTime), Math.max(0, safeDuration - 0.05));
         navigator.mediaSession.setPositionState({
-          duration: this.activeAudio.duration,
+          duration: safeDuration,
           playbackRate: this.activeAudio.playbackRate || 1.0,
-          position: Math.min(Math.max(0, this.activeAudio.currentTime), this.activeAudio.duration)
+          position: safePos
         });
       } catch (e) {
         // Suppress rapid seek sync warnings
@@ -630,12 +636,16 @@ class AudioEngine {
     if (!track) return;
 
     if (this.isTrackRequiringAuth(track)) {
-      this.state.isLoading = false;
-      this.state.isPlaying = false;
-      this.state.error = 'drive_auth_required';
-      this.notifyListeners();
-      this.notifyAuthRequired('drive', track);
-      return;
+      // Attempt proactive silent refresh before declaring unauthenticated
+      const refreshed = await authService.refreshAccessTokenSilently();
+      if (!refreshed && this.isTrackRequiringAuth(track)) {
+        this.state.isLoading = false;
+        this.state.isPlaying = false;
+        this.state.error = 'drive_auth_required';
+        this.notifyListeners();
+        this.notifyAuthRequired('drive', track);
+        return;
+      }
     }
 
     this.initWebAudio();
@@ -690,6 +700,20 @@ class AudioEngine {
                         err?.message?.includes('401') ||
                         err?.status === 401;
       if (isAuthErr || this.isTrackRequiringAuth(track)) {
+        // Attempt silent recovery
+        const recovered = await authService.refreshAccessTokenSilently();
+        if (recovered) {
+          try {
+            const retryStreamUrl = await this.getTrackStreamUrl(track);
+            if (retryStreamUrl) {
+              this.activeAudio.src = retryStreamUrl;
+              await this.activeAudio.play();
+              this.state.isPlaying = true;
+              this.notifyListeners();
+              return;
+            }
+          } catch {}
+        }
         this.state.error = 'drive_auth_required';
         this.notifyAuthRequired('drive', track);
       } else {
@@ -710,14 +734,17 @@ class AudioEngine {
     if (!targetTrack) return;
 
     if (this.isTrackRequiringAuth(targetTrack)) {
-      this.isCrossfading = false;
-      this.state.isLoading = false;
-      this.state.isPlaying = false;
-      this.state.currentTrackIndex = targetIdx;
-      this.state.error = 'drive_auth_required';
-      this.notifyListeners();
-      this.notifyAuthRequired('drive', targetTrack);
-      return;
+      const refreshed = await authService.refreshAccessTokenSilently();
+      if (!refreshed && this.isTrackRequiringAuth(targetTrack)) {
+        this.isCrossfading = false;
+        this.state.isLoading = false;
+        this.state.isPlaying = false;
+        this.state.currentTrackIndex = targetIdx;
+        this.state.error = 'drive_auth_required';
+        this.notifyListeners();
+        this.notifyAuthRequired('drive', targetTrack);
+        return;
+      }
     }
 
     // If not currently playing or both transitions disabled, perform standard direct play
@@ -1302,8 +1329,11 @@ class AudioEngine {
     this.prefetchUpcomingTracks().catch(() => {});
   }
 
-  public persistCurrentSessionState() {
+  public persistCurrentSessionState(force = false) {
     if (typeof window === 'undefined') return;
+    const now = Date.now();
+    if (!force && now - this.lastSessionPersistTime < 4000) return;
+    this.lastSessionPersistTime = now;
     if (this.state.queue.length > 0) {
       try {
         const session = {
@@ -1315,7 +1345,7 @@ class AudioEngine {
           playbackScope: this.state.playbackScope,
           volume: this.state.volume,
           eqPreset: this.state.eqPreset,
-          timestamp: Date.now()
+          timestamp: now
         };
         localStorage.setItem('audiocar_session_state', JSON.stringify(session));
       } catch {}
