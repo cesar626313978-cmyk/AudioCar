@@ -5,6 +5,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { PlayerState, PlaybackMode } from '../types';
 import { audioEngine } from '../services/audioEngine';
 import { dbService } from '../services/dbService';
@@ -440,68 +441,82 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
               />
             )}
 
-            {/* Left: Compact Artwork Thumbnail */}
-            <div className="relative shrink-0 z-10">
-              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl sm:rounded-2xl overflow-hidden bg-neutral-900 border border-neutral-700/80 shadow-lg flex items-center justify-center">
-                <AlbumArtwork
-                  track={currentTrack}
-                  size="fluid"
-                  isPlaying={playerState.isPlaying}
-                  showVinyl={false}
-                  showFormatBadge={true}
-                  allowZoom={true}
-                  className="w-full h-full"
-                />
-              </div>
-            </div>
-
-            {/* Middle: Title, Artist, Track Count & Live Visualizer */}
-            <div className="flex-1 min-w-0 space-y-1 z-10">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 truncate">
-                  <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-400 truncate">
-                    {currentTrack?.album || 'AudioCar Cloud'}
-                  </span>
-                </div>
-
-                <span className="text-[10px] sm:text-xs font-mono font-bold text-neutral-400 bg-neutral-900/90 px-2 py-0.5 rounded-full border border-neutral-800 shrink-0">
-                  Track {playerState.queue.length > 0 ? playerState.currentTrackIndex + 1 : 0} of {playerState.queue.length}
-                </span>
-              </div>
-
-              <div className="min-h-[1.75rem] sm:min-h-[2rem] flex items-center">
-                <h1 className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight truncate leading-tight w-full">
-                  {currentTrack?.title || currentTrack?.name || 'Select a song'}
-                </h1>
-              </div>
-
-              <div className="flex items-center justify-between gap-3 min-h-[1.25rem]">
-                <p className="text-xs sm:text-sm font-medium text-neutral-400 truncate">
-                  {currentTrack?.artist || 'Google Drive Cloud Audio'}
-                </p>
-
-                {/* Inline Compact Spectrum Visualizer */}
-                <div className="w-24 sm:w-32 md:w-40 shrink-0 hidden xs:block">
-                  <AudioVisualizer
-                    isPlaying={playerState.isPlaying}
-                    height={18}
-                    barColor={ledColor !== 'off' && ledColor !== 'rainbow' ? activeLedConfig.dotColor : '#FFFFFF'}
-                  />
-                </div>
-              </div>
-
-              {/* Notice when track is in Google Drive but not connected */}
-              {audioEngine.isTrackRequiringAuth(currentTrack) && (
-                <div 
-                  onClick={() => audioEngine.notifyAuthRequired('drive', currentTrack || undefined)}
-                  className="mt-1 flex items-center gap-2 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs cursor-pointer hover:bg-amber-500/20 transition-all"
-                  role="button"
-                  tabIndex={0}
+            {/* DYNAMIC SONG INFO CONTAINER: Smooth animated transition when changing tracks */}
+            <div className="flex-1 min-w-0 relative overflow-hidden">
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  key={currentTrack?.id || `track-${playerState.currentTrackIndex}`}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1.0] }}
+                  className="w-full flex items-center gap-3 sm:gap-4 min-w-0"
                 >
-                  <Cloud className="w-3.5 h-3.5 shrink-0 text-amber-400" />
-                  <span className="font-semibold truncate">Drive Disconnected • Tap to connect</span>
-                </div>
-              )}
+                  {/* Left: Compact Artwork Thumbnail */}
+                  <div className="relative shrink-0 z-10">
+                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl sm:rounded-2xl overflow-hidden bg-neutral-900 border border-neutral-700/80 shadow-lg flex items-center justify-center">
+                      <AlbumArtwork
+                        track={currentTrack}
+                        size="fluid"
+                        isPlaying={playerState.isPlaying}
+                        showVinyl={false}
+                        showFormatBadge={true}
+                        allowZoom={true}
+                        className="w-full h-full"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Middle: Title, Artist, Track Count & Live Visualizer */}
+                  <div className="flex-1 min-w-0 space-y-1 z-10">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-400 truncate">
+                          {currentTrack?.album || 'AudioCar Cloud'}
+                        </span>
+                      </div>
+
+                      <span className="text-[10px] sm:text-xs font-mono font-bold text-neutral-400 bg-neutral-900/90 px-2 py-0.5 rounded-full border border-neutral-800 shrink-0">
+                        Track {playerState.queue.length > 0 ? playerState.currentTrackIndex + 1 : 0} of {playerState.queue.length}
+                      </span>
+                    </div>
+
+                    <div className="min-h-[1.75rem] sm:min-h-[2rem] flex items-center">
+                      <h1 className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight truncate leading-tight w-full">
+                        {currentTrack?.title || currentTrack?.name || 'Select a song'}
+                      </h1>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3 min-h-[1.25rem]">
+                      <p className="text-xs sm:text-sm font-medium text-neutral-400 truncate">
+                        {currentTrack?.artist || 'Google Drive Cloud Audio'}
+                      </p>
+
+                      {/* Inline Compact Spectrum Visualizer */}
+                      <div className="w-24 sm:w-32 md:w-40 shrink-0 hidden xs:block">
+                        <AudioVisualizer
+                          isPlaying={playerState.isPlaying}
+                          height={18}
+                          barColor={ledColor !== 'off' && ledColor !== 'rainbow' ? activeLedConfig.dotColor : '#FFFFFF'}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Notice when track is in Google Drive but not connected */}
+                    {audioEngine.isTrackRequiringAuth(currentTrack) && (
+                      <div 
+                        onClick={() => audioEngine.notifyAuthRequired('drive', currentTrack || undefined)}
+                        className="mt-1 flex items-center gap-2 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs cursor-pointer hover:bg-amber-500/20 transition-all"
+                        role="button"
+                        tabIndex={0}
+                      >
+                        <Cloud className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                        <span className="font-semibold truncate">Drive Disconnected • Tap to connect</span>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              </AnimatePresence>
             </div>
 
             {/* Right: Tactile Favorite Heart Button */}

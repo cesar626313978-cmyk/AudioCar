@@ -692,6 +692,26 @@ class AudioEngine {
     return track.streamUrl || '';
   }
 
+  /**
+   * Micro-fade out active audio element smoothly over 25ms to prevent audible click/chasquido on speakers
+   */
+  private async fadeOutAudio(durationMs: number = 25): Promise<void> {
+    if (!this.activeAudio || this.activeAudio.paused || this.activeAudio.ended) return;
+    try {
+      if (this.audioContext && this.activeGainNode && this.audioContext.state !== 'suspended') {
+        const now = this.audioContext.currentTime;
+        const currentGain = this.activeGainNode.gain.value;
+        this.activeGainNode.gain.cancelScheduledValues(now);
+        this.activeGainNode.gain.setValueAtTime(currentGain, now);
+        this.activeGainNode.gain.linearRampToValueAtTime(0.0001, now + (durationMs / 1000));
+        await new Promise((resolve) => setTimeout(resolve, durationMs));
+      }
+    } catch {}
+    try {
+      this.activeAudio.pause();
+    } catch {}
+  }
+
   private async playCurrentTrack() {
     const track = this.getCurrentTrack();
     if (!track) return;
@@ -722,6 +742,11 @@ class AudioEngine {
     this.updateMediaSessionMetadata(track);
 
     try {
+      // Smoothly silence outgoing audio before changing source to eliminate DAC click / chasquido
+      if (!this.activeAudio.paused) {
+        await this.fadeOutAudio(25);
+      }
+
       const streamUrl = await this.getTrackStreamUrl(track);
       if (!streamUrl) throw new Error('No audio URL found for this track');
 
@@ -733,10 +758,13 @@ class AudioEngine {
       if (this.state.isFadeInOutEnabled && this.activeGainNode && this.audioContext) {
         const now = this.audioContext.currentTime;
         this.activeGainNode.gain.cancelScheduledValues(now);
-        this.activeGainNode.gain.setValueAtTime(0, now);
+        this.activeGainNode.gain.setValueAtTime(0.0001, now);
         this.activeGainNode.gain.linearRampToValueAtTime(1.0, now + this.state.fadeInOutDuration);
       } else if (this.activeGainNode && this.audioContext) {
-        this.activeGainNode.gain.setValueAtTime(1.0, this.audioContext.currentTime);
+        const now = this.audioContext.currentTime;
+        this.activeGainNode.gain.cancelScheduledValues(now);
+        this.activeGainNode.gain.setValueAtTime(0.0001, now);
+        this.activeGainNode.gain.linearRampToValueAtTime(1.0, now + 0.03); // 30ms anti-pop micro-ramp
       }
 
       await currentAudio.play();
@@ -842,12 +870,12 @@ class AudioEngine {
 
       if (this.audioContext && incomingGain && outgoingGain) {
         incomingGain.gain.cancelScheduledValues(now);
-        incomingGain.gain.setValueAtTime(0, now);
+        incomingGain.gain.setValueAtTime(0.0001, now);
         incomingGain.gain.linearRampToValueAtTime(1.0, now + duration);
 
         outgoingGain.gain.cancelScheduledValues(now);
-        outgoingGain.gain.setValueAtTime(1.0, now);
-        outgoingGain.gain.linearRampToValueAtTime(0, now + duration);
+        outgoingGain.gain.setValueAtTime(outgoingGain.gain.value || 1.0, now);
+        outgoingGain.gain.linearRampToValueAtTime(0.0001, now + duration);
       }
 
       await incomingAudio.play();
@@ -981,6 +1009,19 @@ class AudioEngine {
         }
         this.fadeOutTimer = null;
       }, this.state.fadeInOutDuration * 1000);
+    } else if (this.activeGainNode && this.audioContext && this.audioContext.state !== 'suspended') {
+      // 25ms micro-fade to eliminate the pop/click on direct pause
+      const now = this.audioContext.currentTime;
+      const currentGain = this.activeGainNode.gain.value || 1.0;
+      this.activeGainNode.gain.cancelScheduledValues(now);
+      this.activeGainNode.gain.setValueAtTime(currentGain, now);
+      this.activeGainNode.gain.linearRampToValueAtTime(0.0001, now + 0.025);
+      this.fadeOutTimer = setTimeout(() => {
+        if (!this.state.isPlaying) {
+          this.activeAudio.pause();
+        }
+        this.fadeOutTimer = null;
+      }, 25);
     } else {
       this.activeAudio.pause();
     }
@@ -1064,8 +1105,11 @@ class AudioEngine {
     this.state.volume = clamped;
     this.state.isMuted = clamped === 0;
 
-    if (this.masterGain && this.audioContext) {
-      this.masterGain.gain.setValueAtTime(clamped, this.audioContext.currentTime);
+    if (this.masterGain && this.audioContext && this.audioContext.state !== 'suspended') {
+      const now = this.audioContext.currentTime;
+      this.masterGain.gain.cancelScheduledValues(now);
+      this.masterGain.gain.setValueAtTime(this.masterGain.gain.value, now);
+      this.masterGain.gain.linearRampToValueAtTime(clamped, now + 0.02);
     }
 
     this.notifyListeners();

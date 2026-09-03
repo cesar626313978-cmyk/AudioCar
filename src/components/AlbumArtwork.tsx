@@ -144,7 +144,7 @@ export const AlbumArtwork: React.FC<AlbumArtworkProps> = ({
   const [hasError, setHasError] = useState(false);
   const [discoveredArtworkUrl, setDiscoveredArtworkUrl] = useState<string | null>(cachedArt?.url || null);
   const [discoveredFormat, setDiscoveredFormat] = useState<ImageFormat>(cachedArt?.format || 'JPG');
-  const [isImgLoaded, setIsImgLoaded] = useState(false);
+  const [isImgLoaded, setIsImgLoaded] = useState(Boolean(rawUrl || cachedArt?.url));
 
   // Derive title, artist, format and image URL from track or props
   const trackTitle = track?.title || propTitle || 'AudioCar Studio';
@@ -155,10 +155,10 @@ export const AlbumArtwork: React.FC<AlbumArtworkProps> = ({
   useEffect(() => {
     let isMounted = true;
     setHasError(false);
-    setIsImgLoaded(false);
 
     if (rawUrl) {
       setDiscoveredArtworkUrl(null);
+      setIsImgLoaded(true);
       return;
     }
 
@@ -167,6 +167,7 @@ export const AlbumArtwork: React.FC<AlbumArtworkProps> = ({
         const cached = folderArtworkCache.get(folderId)!;
         setDiscoveredArtworkUrl(cached.url);
         setDiscoveredFormat(cached.format);
+        setIsImgLoaded(true);
         return;
       }
 
@@ -175,6 +176,7 @@ export const AlbumArtwork: React.FC<AlbumArtworkProps> = ({
           folderArtworkCache.set(folderId, { url: art.url, format: art.format || 'JPG' });
           setDiscoveredArtworkUrl(art.url);
           setDiscoveredFormat(art.format || 'JPG');
+          setIsImgLoaded(true);
           setHasError(false);
         }
       }).catch(() => {});
