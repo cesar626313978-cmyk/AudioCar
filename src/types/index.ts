@@ -104,7 +104,7 @@ export interface PlayerState {
   isCrossfadeEnabled: boolean;
   crossfadeDuration: number; // 1 to 12 seconds
   isFadeInOutEnabled: boolean;
-  fadeInOutDuration: number; // in seconds (0.2 to 2.0s)
+  fadeInOutDuration: number; // in seconds (0.5 to 10s)
   playbackRate: number; // 0.75, 1.0, 1.25, 1.5, 2.0
   isLoading: boolean;
   bufferedEnd: number;

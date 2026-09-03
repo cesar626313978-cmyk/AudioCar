@@ -1220,7 +1220,7 @@ class AudioEngine {
   public setFadeInOut(enabled: boolean, durationSeconds?: number) {
     this.state.isFadeInOutEnabled = enabled;
     if (durationSeconds !== undefined) {
-      this.state.fadeInOutDuration = Math.max(0.1, Math.min(2.0, durationSeconds));
+      this.state.fadeInOutDuration = Math.max(0.5, Math.min(10, durationSeconds));
     }
     this.notifyListeners();
     dbService.setSetting('player_fade_in_out', enabled);

@@ -17,7 +17,6 @@ import {
   X,
   Sliders,
   Database,
-  Key,
   Check,
   Zap,
   Sparkles,
@@ -38,10 +37,9 @@ import {
   MessageSquare,
   RotateCcw,
   User,
-  UserCheck
+  UserCheck,
+  ExternalLink
 } from 'lucide-react';
-
-import { LogoDownloadHelper } from './LogoDownloadHelper';
 
 interface AudioSettingsModalProps {
   playerState: PlayerState;
@@ -66,8 +64,6 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
   onOpenContact,
   onOpenHelp
 }) => {
-  const [customClientId, setCustomClientId] = useState(authService.getClientId());
-  const [savedClientIdMsg, setSavedClientIdMsg] = useState(false);
   const [clearedCacheMsg, setClearedCacheMsg] = useState(false);
   const [currentUser, setCurrentUser] = useState<DriveAuthUser | null>(authService.getUser());
   const [resetMsg, setResetMsg] = useState(false);
@@ -106,13 +102,6 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
     { id: 'Electronic / Dance', label: 'Electrónica / Dance', desc: 'Graves potentes y agudos brillantes' },
     { id: 'Acoustic / Roadtrip', label: 'Acústico & Roadtrip', desc: 'Calidez espacial para viajes en carretera' }
   ];
-
-  const handleSaveClientId = (e: React.FormEvent) => {
-    e.preventDefault();
-    authService.setClientId(customClientId);
-    setSavedClientIdMsg(true);
-    setTimeout(() => setSavedClientIdMsg(false), 3000);
-  };
 
   const handleClearCache = async () => {
     if (typeof window !== 'undefined' && window.indexedDB) {
@@ -517,21 +506,40 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
             </div>
 
             {playerState.isFadeInOutEnabled && (
-              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-neutral-800/60">
-                <span className="text-xs font-mono text-neutral-400 mr-2">Tiempo de rampa:</span>
-                {[1, 3, 5, 8, 10].map((dur) => (
-                  <button
-                    key={dur}
-                    onClick={() => audioEngine.setFadeInOut(true, dur)}
-                    className={`hitbox-48 px-3.5 py-1 rounded-full text-xs font-mono font-bold transition-all ${
-                      playerState.fadeInOutDuration === dur
-                        ? 'bg-white text-black shadow-sm'
-                        : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800'
-                    }`}
-                  >
-                    {dur}s
-                  </button>
-                ))}
+              <div className="space-y-2 pt-2 border-t border-neutral-800/60">
+                <div className="flex items-center justify-between text-xs font-mono text-neutral-400">
+                  <span>Tiempo de rampa (Desvanecimiento):</span>
+                  <span className="font-bold text-white">{playerState.fadeInOutDuration} Segundos</span>
+                </div>
+
+                <input
+                  type="range"
+                  min="1"
+                  max="10"
+                  step="1"
+                  value={playerState.fadeInOutDuration}
+                  onChange={(e) => audioEngine.setFadeInOut(true, parseInt(e.target.value, 10))}
+                  className="automotive-slider w-full h-4"
+                />
+
+                {/* Preset quick buttons */}
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-xs font-mono text-neutral-400 mr-1">Preajustes rápidos:</span>
+                  {[1, 2, 3, 5, 8, 10].map((dur) => (
+                    <button
+                      key={dur}
+                      type="button"
+                      onClick={() => audioEngine.setFadeInOut(true, dur)}
+                      className={`hitbox-48 px-3.5 py-1.5 rounded-full text-xs font-mono font-bold transition-all ${
+                        playerState.fadeInOutDuration === dur
+                          ? 'bg-white text-black shadow-sm ring-2 ring-white/30'
+                          : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800'
+                      }`}
+                    >
+                      {dur}s
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -668,40 +676,6 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
           </div>
         </div>
 
-        {/* 5. Google OAuth Client ID Configuration */}
-        <div className="space-y-3 pt-2 border-t border-neutral-800">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400 flex items-center gap-2">
-            <Key className="w-4 h-4 text-neutral-300" />
-            <span>Configuración OAuth 2.0 Google Client ID</span>
-          </h3>
-
-          <form onSubmit={handleSaveClientId} className="space-y-2">
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={customClientId}
-                onChange={(e) => setCustomClientId(e.target.value)}
-                placeholder="Ingresa tu Google OAuth Client ID..."
-                className="flex-1 h-12 px-4 rounded-full bg-[#0f0f0f] border border-neutral-800 text-xs font-mono text-white placeholder-neutral-500 focus:outline-none focus:border-neutral-500"
-              />
-              <button
-                type="submit"
-                className="hitbox-48 px-5 h-12 rounded-full bg-white hover:bg-neutral-200 text-black text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shrink-0"
-              >
-                <Check className="w-4 h-4 text-black" />
-                <span>Guardar</span>
-              </button>
-            </div>
-            {savedClientIdMsg && (
-              <p className="text-xs text-neutral-300">¡Client ID actualizado correctamente!</p>
-            )}
-          </form>
-
-          {/* Logo Oficial para Google Cloud Console */}
-          <div className="pt-2">
-            <LogoDownloadHelper />
-          </div>
-        </div>
 
         {/* 6. Pistas DEMO & Almacenamiento */}
         <div className="pt-2 border-t border-neutral-800 space-y-3">
@@ -851,6 +825,24 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
           >
             {clearedCacheMsg ? 'Cache Cleared!' : 'Clear Cache'}
           </button>
+        </div>
+
+        {/* 10. Política de Privacidad (Enlace simple y directo) */}
+        <div className="pt-2 border-t border-neutral-800/80 flex items-center justify-between text-xs text-neutral-400">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-neutral-400" />
+            <span>Privacidad y Protección de Datos</span>
+          </div>
+
+          <a
+            href="/privacy.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-xs text-neutral-300 hover:text-white underline underline-offset-4 py-1"
+          >
+            <span>Ver Política de Privacidad</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
         </div>
       </div>
 
