@@ -355,7 +355,10 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
   ];
 
   return (
-    <div className="flex-1 w-full h-full bg-[#070707] text-white flex flex-col justify-between overflow-hidden select-none font-sans relative">
+    <div
+      className="flex-1 w-full h-full bg-[#070707] text-white flex flex-col justify-between overflow-hidden select-none font-sans relative"
+      style={activeLedConfig.cssVars}
+    >
       
       {/* 2. CENTERED HERO PLAYER (Compact & Square-optimized for Automotive Viewport) */}
       <main className="flex-1 w-full max-w-[780px] lg:max-w-[840px] mx-auto px-3 sm:px-6 py-2 sm:py-3 flex flex-col justify-center items-center min-h-0 overflow-hidden my-auto">
@@ -462,7 +465,19 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                 >
                   {/* Left: Compact Artwork Thumbnail */}
                   <div className="relative shrink-0 z-10">
-                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl sm:rounded-2xl overflow-hidden bg-neutral-900 border border-neutral-700/80 shadow-lg flex items-center justify-center">
+                    <div
+                      className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl sm:rounded-2xl overflow-hidden shadow-lg flex items-center justify-center transition-all duration-500 border"
+                      style={{
+                        borderColor:
+                          ledColor !== 'off'
+                            ? 'var(--led-color, rgba(255,255,255,0.3))'
+                            : 'rgba(255, 255, 255, 0.1)',
+                        boxShadow:
+                          ledColor !== 'off'
+                            ? '0 0 16px -2px var(--led-color-glow, rgba(0,0,0,0.5))'
+                            : undefined
+                      }}
+                    >
                       <AlbumArtwork
                         track={currentTrack}
                         size="fluid"
@@ -866,7 +881,7 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                         <span className={`w-5 text-center text-xs font-mono font-bold shrink-0 ${isCurrent ? 'text-black' : 'text-neutral-500'}`}>
                           {idx + 1}
                         </span>
-                        <div className="w-9 h-9 rounded-xl overflow-hidden shrink-0 bg-neutral-900 border border-neutral-800 flex items-center justify-center">
+                        <div className="w-9 h-9 rounded-xl overflow-hidden shrink-0 border border-white/15 flex items-center justify-center shadow-sm">
                           <AlbumArtwork
                             track={track}
                             size="sm"

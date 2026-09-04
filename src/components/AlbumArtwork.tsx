@@ -224,16 +224,26 @@ export const AlbumArtwork: React.FC<AlbumArtworkProps> = ({
     <div
       className={`relative select-none overflow-hidden shrink-0 shadow-md ${roundedClass} ${sizeClasses[size] || sizeClasses.md} ${className}`}
       style={{
-        boxShadow: !activeImage ? `0 6px 20px -4px ${theme.glow}` : undefined
+        boxShadow: !activeImage ? `0 6px 20px -4px var(--led-color-glow, ${theme.glow})` : undefined
       }}
     >
-      {/* 1. Realistic Personalized Spinning Vinyl Record Base Layer */}
-      <div className="w-full h-full bg-[#08080a] flex items-center justify-center p-0.5 sm:p-1 relative overflow-hidden border border-neutral-800 shadow-inner">
+      {/* 1. Realistic Personalized Spinning Vinyl Record Base Layer with Ambient LED Background */}
+      <div
+        className="w-full h-full flex items-center justify-center p-1 sm:p-1.5 relative overflow-hidden border transition-all duration-500"
+        style={{
+          background:
+            'var(--led-border-gradient, linear-gradient(135deg, var(--led-color, #10B981) 0%, var(--led-color-subtle, rgba(16, 185, 129, 0.65)) 50%, var(--led-color-ambient, rgba(10, 15, 20, 0.95)) 100%))',
+          borderColor: 'var(--led-color-subtle, rgba(255, 255, 255, 0.2))',
+          boxShadow: 'inset 0 0 16px -2px rgba(0, 0, 0, 0.45)'
+        }}
+      >
         {/* The Vinyl LP Disc */}
         <div
-          className={`relative w-full h-full rounded-full flex items-center justify-center overflow-hidden shadow-2xl border border-neutral-700/60 bg-[#0d0e12] animate-vinyl-spin transition-transform`}
+          className={`relative w-[90%] h-[90%] rounded-full flex items-center justify-center overflow-hidden shadow-2xl border border-black/80 bg-[#0d0e12] animate-vinyl-spin transition-transform`}
           style={{
-            animationPlayState: isPlaying ? 'running' : 'paused'
+            animationPlayState: isPlaying ? 'running' : 'paused',
+            boxShadow:
+              '0 8px 24px -2px rgba(0, 0, 0, 0.75), 0 2px 8px 0 rgba(0, 0, 0, 0.6)'
           }}
         >
           {/* Concentric Sound Grooves Texture */}
