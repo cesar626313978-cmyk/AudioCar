@@ -388,4 +388,42 @@ input[type="range"].automotive-slider::-webkit-slider-runnable-track {
     inset 0 0 20px -8px var(--led-color-ambient, rgba(232, 33, 39, 0.15)) !important;
 }
 
+/* Realistic Vinyl Record Animations & Textures */
+@keyframes vinyl-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-vinyl-spin {
+  animation: vinyl-spin 7s linear infinite;
+}
+
+.vinyl-grooves-pattern {
+  background-image: repeating-radial-gradient(
+    circle at 50% 50%,
+    #0a0b0d 0px,
+    #18191f 1px,
+    #0c0d10 2px,
+    #131418 3px
+  );
+}
+
+.vinyl-sheen-overlay {
+  background: conic-gradient(
+    from 45deg at 50% 50%,
+    transparent 0deg,
+    rgba(255, 255, 255, 0.08) 25deg,
+    transparent 50deg,
+    transparent 180deg,
+    rgba(255, 255, 255, 0.08) 205deg,
+    transparent 230deg,
+    transparent 360deg
+  );
+}
+
+
 

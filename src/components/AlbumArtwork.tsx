@@ -18,103 +18,79 @@ export interface AlbumArtworkProps {
   rounded?: boolean;
 }
 
-// 12 Curated Neon & Vibrant Automotive Luxury Gradients for Tracks
-const TRACK_THEMES = [
+// Curated Iconic Vinyl Record Center-Label Themes (Blue Note, Sun, Motown, Abbey, Stax, Gold, etc.)
+const VINYL_LABEL_THEMES = [
   {
-    id: 'violet-pulse',
-    bg: 'from-violet-600 via-purple-700 to-indigo-950',
-    ring: 'border-purple-400/40',
-    text: 'text-purple-200',
-    center: 'bg-purple-900/90',
-    glow: 'rgba(168, 85, 247, 0.4)'
+    id: 'blue-note',
+    labelBg: 'bg-gradient-to-br from-blue-600 via-blue-800 to-indigo-950',
+    ring: 'border-cyan-300/50',
+    accentText: 'text-cyan-300',
+    titleColor: 'text-white',
+    subColor: 'text-blue-200',
+    glow: 'rgba(59, 130, 246, 0.4)'
   },
   {
-    id: 'sunset-blaze',
-    bg: 'from-amber-500 via-orange-600 to-red-950',
-    ring: 'border-amber-400/40',
-    text: 'text-amber-200',
-    center: 'bg-amber-900/90',
+    id: 'sun-amber',
+    labelBg: 'bg-gradient-to-br from-amber-500 via-orange-600 to-amber-950',
+    ring: 'border-yellow-300/50',
+    accentText: 'text-amber-300',
+    titleColor: 'text-white',
+    subColor: 'text-amber-100',
     glow: 'rgba(245, 158, 11, 0.4)'
   },
   {
-    id: 'electric-cyan',
-    bg: 'from-cyan-500 via-blue-600 to-slate-950',
-    ring: 'border-cyan-400/40',
-    text: 'text-cyan-200',
-    center: 'bg-cyan-900/90',
-    glow: 'rgba(6, 182, 212, 0.4)'
+    id: 'motown-purple',
+    labelBg: 'bg-gradient-to-br from-purple-600 via-fuchsia-800 to-indigo-950',
+    ring: 'border-fuchsia-300/50',
+    accentText: 'text-fuchsia-300',
+    titleColor: 'text-white',
+    subColor: 'text-purple-200',
+    glow: 'rgba(168, 85, 247, 0.4)'
   },
   {
-    id: 'emerald-aurora',
-    bg: 'from-emerald-500 via-teal-700 to-slate-950',
-    ring: 'border-emerald-400/40',
-    text: 'text-emerald-200',
-    center: 'bg-emerald-900/90',
+    id: 'abbey-emerald',
+    labelBg: 'bg-gradient-to-br from-emerald-600 via-teal-800 to-slate-950',
+    ring: 'border-emerald-300/50',
+    accentText: 'text-emerald-300',
+    titleColor: 'text-white',
+    subColor: 'text-emerald-100',
     glow: 'rgba(16, 185, 129, 0.4)'
   },
   {
-    id: 'crimson-speed',
-    bg: 'from-rose-600 via-red-700 to-neutral-950',
-    ring: 'border-rose-400/40',
-    text: 'text-rose-200',
-    center: 'bg-rose-900/90',
-    glow: 'rgba(225, 29, 72, 0.4)'
+    id: 'stax-ruby',
+    labelBg: 'bg-gradient-to-br from-rose-600 via-red-700 to-neutral-950',
+    ring: 'border-rose-300/50',
+    accentText: 'text-rose-300',
+    titleColor: 'text-white',
+    subColor: 'text-rose-100',
+    glow: 'rgba(244, 63, 94, 0.4)'
   },
   {
-    id: 'neon-synth',
-    bg: 'from-fuchsia-600 via-pink-600 to-purple-950',
-    ring: 'border-fuchsia-400/40',
-    text: 'text-fuchsia-200',
-    center: 'bg-fuchsia-900/90',
-    glow: 'rgba(217, 70, 239, 0.4)'
-  },
-  {
-    id: 'sapphire-night',
-    bg: 'from-blue-600 via-indigo-700 to-slate-950',
-    ring: 'border-blue-400/40',
-    text: 'text-blue-200',
-    center: 'bg-blue-900/90',
-    glow: 'rgba(37, 99, 235, 0.4)'
-  },
-  {
-    id: 'golden-lux',
-    bg: 'from-yellow-500 via-amber-600 to-stone-950',
-    ring: 'border-yellow-400/40',
-    text: 'text-yellow-200',
-    center: 'bg-amber-900/90',
+    id: 'dg-gold',
+    labelBg: 'bg-gradient-to-br from-yellow-500 via-amber-600 to-yellow-950',
+    ring: 'border-yellow-200/60',
+    accentText: 'text-amber-200',
+    titleColor: 'text-white',
+    subColor: 'text-yellow-100',
     glow: 'rgba(234, 179, 8, 0.4)'
   },
   {
-    id: 'teal-wave',
-    bg: 'from-teal-400 via-cyan-600 to-emerald-950',
-    ring: 'border-teal-400/40',
-    text: 'text-teal-200',
-    center: 'bg-teal-900/90',
-    glow: 'rgba(20, 184, 166, 0.4)'
+    id: 'cyan-matrix',
+    labelBg: 'bg-gradient-to-br from-cyan-600 via-teal-800 to-slate-950',
+    ring: 'border-cyan-300/50',
+    accentText: 'text-cyan-200',
+    titleColor: 'text-white',
+    subColor: 'text-cyan-100',
+    glow: 'rgba(6, 182, 212, 0.4)'
   },
   {
-    id: 'hyper-coral',
-    bg: 'from-orange-500 via-rose-600 to-violet-950',
-    ring: 'border-orange-400/40',
-    text: 'text-orange-200',
-    center: 'bg-orange-900/90',
+    id: 'coral-vintage',
+    labelBg: 'bg-gradient-to-br from-orange-600 via-rose-700 to-neutral-950',
+    ring: 'border-orange-300/50',
+    accentText: 'text-orange-200',
+    titleColor: 'text-white',
+    subColor: 'text-orange-100',
     glow: 'rgba(249, 115, 22, 0.4)'
-  },
-  {
-    id: 'indigo-matrix',
-    bg: 'from-indigo-600 via-blue-700 to-cyan-950',
-    ring: 'border-indigo-400/40',
-    text: 'text-indigo-200',
-    center: 'bg-indigo-900/90',
-    glow: 'rgba(99, 102, 241, 0.4)'
-  },
-  {
-    id: 'velvet-ruby',
-    bg: 'from-pink-600 via-rose-700 to-stone-950',
-    ring: 'border-pink-400/40',
-    text: 'text-pink-200',
-    center: 'bg-rose-900/90',
-    glow: 'rgba(244, 63, 94, 0.4)'
   }
 ];
 
@@ -211,8 +187,8 @@ export const AlbumArtwork: React.FC<AlbumArtworkProps> = ({
       hash = (hash << 5) - hash + key.charCodeAt(i);
       hash |= 0;
     }
-    const idx = Math.abs(hash) % TRACK_THEMES.length;
-    return TRACK_THEMES[idx];
+    const idx = Math.abs(hash) % VINYL_LABEL_THEMES.length;
+    return VINYL_LABEL_THEMES[idx];
   }, [trackArtist, trackTitle]);
 
   const sizeClasses: Record<string, string> = {
@@ -242,72 +218,91 @@ export const AlbumArtwork: React.FC<AlbumArtworkProps> = ({
       : 'rounded-2xl'
     : 'rounded-none';
 
+  const isCompact = size === 'xs' || size === 'sm';
+
   return (
     <div
       className={`relative select-none overflow-hidden shrink-0 shadow-md ${roundedClass} ${sizeClasses[size] || sizeClasses.md} ${className}`}
       style={{
-        boxShadow: !activeImage ? `0 4px 16px -4px ${theme.glow}` : undefined
+        boxShadow: !activeImage ? `0 6px 20px -4px ${theme.glow}` : undefined
       }}
     >
-      {/* 1. Stable Base Layer: Dynamic Colorful Vinyl Artwork (Always rendered as fallback and smooth underlay) */}
-      <div
-        className={`w-full h-full bg-gradient-to-br ${theme.bg} flex flex-col items-center justify-center p-1 relative overflow-hidden border ${theme.ring} shadow-inner`}
-      >
-        {/* Subtle Concentric Vinyl Grooves Pattern */}
+      {/* 1. Realistic Personalized Spinning Vinyl Record Base Layer */}
+      <div className="w-full h-full bg-[#08080a] flex items-center justify-center p-0.5 sm:p-1 relative overflow-hidden border border-neutral-800 shadow-inner">
+        {/* The Vinyl LP Disc */}
         <div
-          className="absolute inset-0 opacity-25 pointer-events-none"
+          className={`relative w-full h-full rounded-full flex items-center justify-center overflow-hidden shadow-2xl border border-neutral-700/60 bg-[#0d0e12] animate-vinyl-spin transition-transform`}
           style={{
-            backgroundImage:
-              'radial-gradient(circle, transparent 20%, rgba(255,255,255,0.18) 21%, transparent 22%, transparent 45%, rgba(255,255,255,0.18) 46%, transparent 47%, transparent 70%, rgba(255,255,255,0.18) 71%, transparent 72%)'
+            animationPlayState: isPlaying ? 'running' : 'paused'
           }}
-        />
+        >
+          {/* Concentric Sound Grooves Texture */}
+          <div className="absolute inset-0 rounded-full vinyl-grooves-pattern opacity-90 pointer-events-none" />
 
-        {/* Central Mini-Vinyl Disc */}
-        <div className="relative z-10 flex flex-col items-center justify-center">
+          {/* Sound-track Division Rings */}
+          <div className="absolute inset-[10%] rounded-full border border-white/[0.06] pointer-events-none" />
+          <div className="absolute inset-[22%] rounded-full border border-white/[0.05] pointer-events-none" />
+          <div className="absolute inset-[32%] rounded-full border border-white/[0.04] pointer-events-none" />
+
+          {/* Realistic Specular Conic Light Sheen */}
+          <div className="absolute inset-0 rounded-full vinyl-sheen-overlay pointer-events-none opacity-80 mix-blend-screen" />
+
+          {/* Center Record Label ("La Galleta" personalizada del vinilo) */}
           <div
-            className={`rounded-full ${theme.center} border border-white/40 flex items-center justify-center shadow-lg transition-transform ${
-              isPlaying ? 'animate-spin [animation-duration:10s]' : ''
-            } ${
-              size === 'xs'
-                ? 'w-5 h-5'
-                : size === 'sm'
-                ? 'w-7 h-7'
-                : size === 'md'
-                ? 'w-10 h-10 sm:w-11 sm:h-11'
-                : size === 'lg'
-                ? 'w-16 h-16'
-                : size === 'xl'
-                ? 'w-24 h-24'
-                : 'w-10 h-10'
+            className={`relative z-10 rounded-full ${theme.labelBg} border border-white/30 ring-1 ring-black/60 shadow-xl flex flex-col items-center justify-center overflow-hidden p-1 ${
+              isCompact ? 'w-[52%] h-[52%]' : 'w-[48%] h-[48%]'
             }`}
           >
-            <span
-              className={`font-mono font-black tracking-wider text-white drop-shadow-md ${
-                size === 'xs'
-                  ? 'text-[7px]'
-                  : size === 'sm'
-                  ? 'text-[9px]'
-                  : size === 'md'
-                  ? 'text-xs'
-                  : size === 'lg'
-                  ? 'text-base'
-                  : size === 'xl'
-                  ? 'text-2xl'
-                  : 'text-xs'
-              }`}
-            >
-              {initials}
-            </span>
-          </div>
+            {/* Fine Inner Label Foil Rings */}
+            <div className="absolute inset-[3px] rounded-full border border-white/25 pointer-events-none" />
 
-          {/* Micro Music Note Icon (for sizes md and up) */}
-          {size !== 'xs' && size !== 'sm' && (
-            <Music className={`w-2.5 h-2.5 ${theme.text} mt-0.5 opacity-90 drop-shadow`} />
-          )}
+            {isCompact ? (
+              /* Compact view for small thumbnails (xs, sm) */
+              <div className="relative z-10 flex flex-col items-center justify-center">
+                <span className="font-mono font-black text-white text-[8px] sm:text-[9px] tracking-wider drop-shadow">
+                  {initials}
+                </span>
+                {/* Micro Spindle Hole */}
+                <div className="w-2 h-2 rounded-full bg-neutral-300 border border-neutral-400 flex items-center justify-center shadow-inner mt-0.5">
+                  <div className="w-1 h-1 rounded-full bg-[#050505]" />
+                </div>
+              </div>
+            ) : (
+              /* High-fidelity view for medium, large & fluid player displays (md, lg, xl, fluid) */
+              <div className="relative z-10 w-full h-full flex flex-col items-center justify-between py-1 px-1 text-center select-none">
+                {/* Top Label Header */}
+                <div className="text-[6px] sm:text-[7px] font-mono tracking-widest font-black uppercase text-white/90 drop-shadow flex items-center gap-0.5">
+                  <span>STEREO</span>
+                  <span>•</span>
+                  <span>33⅓</span>
+                </div>
+
+                {/* Personalized Song Title & Artist */}
+                <div className="w-full flex flex-col items-center justify-center min-w-0 my-auto">
+                  <span className="text-[8px] sm:text-[9px] font-extrabold text-white leading-tight line-clamp-1 w-full px-1 drop-shadow-md">
+                    {trackTitle}
+                  </span>
+                  <span className="text-[6.5px] sm:text-[7.5px] font-medium text-white/80 line-clamp-1 w-full px-1 drop-shadow">
+                    {trackArtist}
+                  </span>
+                </div>
+
+                {/* Brushed Center Spindle Grommet & Hole */}
+                <div className="w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full bg-neutral-200 border border-neutral-400 shadow-inner flex items-center justify-center shrink-0">
+                  <div className="w-1.5 h-1.5 rounded-full bg-[#08080a] ring-1 ring-neutral-600" />
+                </div>
+
+                {/* Bottom Audio Format Badge */}
+                <div className="text-[5.5px] sm:text-[6.5px] font-mono font-bold tracking-wider uppercase text-white/75">
+                  {activeFormat || 'HI-FI'}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* 2. Seamless Image Overlay: Smoothly fades in without screen flashes or DOM tearing */}
+      {/* 2. Seamless Image Overlay: Smoothly fades in if real album cover image exists */}
       {activeImage && (
         <img
           src={activeImage}
@@ -322,7 +317,7 @@ export const AlbumArtwork: React.FC<AlbumArtworkProps> = ({
         />
       )}
 
-      {/* Format Badge (JPG / PNG / GIF / WEBP) */}
+      {/* Format Badge (JPG / PNG / GIF / WEBP) for real album covers */}
       {showFormatBadge && activeImage && (
         <div
           className={`absolute bottom-1 right-1 bg-black/80 backdrop-blur-sm text-white font-mono font-bold tracking-wider rounded-md border border-white/20 shadow-sm ${badgeSizes[size] || badgeSizes.md}`}

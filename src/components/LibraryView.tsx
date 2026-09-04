@@ -383,6 +383,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                           <AlbumArtwork
                             track={track}
                             size="md"
+                            isPlaying={isPlaying}
                             showFormatBadge={false}
                             allowZoom={false}
                             className="w-full h-full object-cover"

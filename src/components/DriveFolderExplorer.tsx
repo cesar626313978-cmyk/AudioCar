@@ -50,6 +50,16 @@ export const DriveFolderExplorer: React.FC<DriveFolderExplorerProps> = ({
     { id: 'root', name: MUSIC_ROOT_FOLDER_NAME }
   ]);
   const [isFetchingFolders, setIsFetchingFolders] = useState(false);
+  const [playingTrackId, setPlayingTrackId] = useState<string | null>(
+    audioEngine.getState().isPlaying ? audioEngine.getCurrentTrack()?.id || null : null
+  );
+
+  useEffect(() => {
+    const unsubscribe = audioEngine.subscribe((st) => {
+      setPlayingTrackId(st.isPlaying ? audioEngine.getCurrentTrack()?.id || null : null);
+    });
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     if (initialFolderId && initialFolderId !== 'root' && initialFolderId !== 'root_all') {
@@ -397,6 +407,7 @@ export const DriveFolderExplorer: React.FC<DriveFolderExplorerProps> = ({
                       <AlbumArtwork
                         track={track}
                         size="md"
+                        isPlaying={playingTrackId === track.id}
                         showFormatBadge={false}
                         allowZoom={false}
                         className="w-full h-full object-cover"

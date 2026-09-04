@@ -870,6 +870,7 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                           <AlbumArtwork
                             track={track}
                             size="sm"
+                            isPlaying={isCurrent && playerState.isPlaying}
                             showFormatBadge={false}
                             allowZoom={false}
                             className="w-full h-full object-cover"
