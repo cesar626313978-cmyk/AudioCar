@@ -10,9 +10,11 @@ import { AudioTrack, DriveFolder, Playlist, ImageFormat } from '../types';
 import { authService } from './authService';
 import { dbService } from './dbService';
 import { fetchWithDriveBackoff } from './driveBackoff';
+import { googlePickerService } from './googlePickerService';
 
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
 export const MUSIC_ROOT_FOLDER_NAME = 'mimusica';
+const SELECTED_FOLDER_STORAGE_KEY = 'tesladrive_selected_music_folder';
 
 const AUDIO_EXTENSIONS = new Set([
   'mp3', 'flac', 'm4a', 'wav', 'ogg', 'aac', 'opus', 'wma',
@@ -54,7 +56,55 @@ export class DriveService {
   }
 
   /**
-   * Checks whether the "/mimusica" root folder exists in the user's Drive without creating it.
+   * Retrieves the user-selected music root folder from persistent storage.
+   */
+  public getSelectedMusicFolder(): DriveFolder | null {
+    try {
+      const raw = localStorage.getItem(SELECTED_FOLDER_STORAGE_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Updates the selected music root folder (e.g. from Google Picker API).
+   */
+  public setSelectedMusicFolder(folder: DriveFolder | null) {
+    this.cachedMusicRootFolder = folder;
+    if (folder) {
+      try {
+        localStorage.setItem(SELECTED_FOLDER_STORAGE_KEY, JSON.stringify(folder));
+      } catch (e) {
+        console.warn('Could not save selected folder:', e);
+      }
+      this.folderDetailsCache.set(folder.id, {
+        id: folder.id,
+        name: folder.name,
+        parentId: 'root',
+        path: `/${folder.name}`
+      });
+    } else {
+      localStorage.removeItem(SELECTED_FOLDER_STORAGE_KEY);
+    }
+  }
+
+  /**
+   * Launches the official Google Picker dialog to allow the user to select
+   * any music folder in their Google Drive with drive.file authorization.
+   */
+  public async promptPickMusicFolder(): Promise<DriveFolder | null> {
+    const folder = await googlePickerService.pickMusicFolder();
+    if (folder) {
+      this.setSelectedMusicFolder(folder);
+      await dbService.saveFolders([folder]).catch(() => {});
+    }
+    return folder;
+  }
+
+  /**
+   * Checks whether a music root folder is linked in AudioCar.
    */
   public async checkMusicRootFolderStatus(): Promise<{ exists: boolean; folder?: DriveFolder; userEmail?: string }> {
     const user = authService.getUser();
@@ -88,7 +138,7 @@ export class DriveService {
   }
 
   /**
-   * Finds the user's dedicated root folder "mimusica" in Google Drive.
+   * Finds the user's dedicated root folder ("mimusica" or the user-selected folder via Google Picker).
    */
   async getMusicRootFolder(createIfNotFound: boolean = false): Promise<DriveFolder | null> {
     if (this.cachedMusicRootFolder) {
@@ -97,6 +147,38 @@ export class DriveService {
 
     const token = authService.getAccessToken();
     if (!token) return null;
+
+    // Check if the user previously linked a folder using Google Picker
+    const selected = this.getSelectedMusicFolder();
+    if (selected) {
+      try {
+        const verifyRes = await fetchWithDriveBackoff(
+          `${DRIVE_API_URL}/files/${selected.id}?fields=id,name,parents,trashed`,
+          { headers: this.getHeaders(token) }
+        );
+        if (verifyRes.ok) {
+          const fileData = await verifyRes.json();
+          if (!fileData.trashed) {
+            const validFolder: DriveFolder = {
+              id: fileData.id,
+              name: fileData.name || selected.name,
+              parentId: fileData.parents?.[0] || 'root',
+              path: `/${fileData.name || selected.name}`
+            };
+            this.cachedMusicRootFolder = validFolder;
+            this.folderDetailsCache.set(validFolder.id, {
+              id: validFolder.id,
+              name: validFolder.name,
+              parentId: 'root',
+              path: `/${validFolder.name}`
+            });
+            return validFolder;
+          }
+        }
+      } catch (e) {
+        console.warn('Could not verify stored selected folder, falling back to query:', e);
+      }
+    }
 
     try {
       // 1. Direct query for folder named "mimusica" or common casing variations

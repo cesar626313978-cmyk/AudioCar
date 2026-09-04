@@ -31,9 +31,10 @@ const DEFAULT_CLIENT_ID =
   ((import.meta as any).env?.VITE_GOOGLE_CLIENT_ID as string) ||
   '463075236141-sspqgvtjaaakh5gna6alvdahhjl827od.apps.googleusercontent.com';
 
+// Scopes adhere strictly to the Principle of Least Privilege:
+// drive.file (Sensitive) + drive.appdata (Recommended) eliminates the mandatory CASA AL1 / Tier 2 paid audit!
 const SCOPES = [
   'https://www.googleapis.com/auth/drive.file',
-  'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/drive.appdata',
   'https://www.googleapis.com/auth/userinfo.profile',
   'https://www.googleapis.com/auth/userinfo.email'

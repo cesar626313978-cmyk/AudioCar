@@ -113,6 +113,25 @@ export const DriveFolderExplorer: React.FC<DriveFolderExplorerProps> = ({
     }
   };
 
+  const handlePickFolder = async () => {
+    try {
+      setIsFetchingFolders(true);
+      const folder = await driveService.promptPickMusicFolder();
+      if (folder) {
+        setRootFolder(folder);
+        setFolderPath([{ id: folder.id, name: folder.name }]);
+        setCurrentFolderId(folder.id);
+        const result = await driveService.listFolders(folder.id);
+        setFolders(result);
+        await onRefreshDrive();
+      }
+    } catch (err) {
+      console.warn('Could not pick folder with Google Picker:', err);
+    } finally {
+      setIsFetchingFolders(false);
+    }
+  };
+
   const loadSubfolders = async (targetId: string) => {
     setIsFetchingFolders(true);
     try {
@@ -241,6 +260,17 @@ export const DriveFolderExplorer: React.FC<DriveFolderExplorerProps> = ({
         {/* Action Controls */}
         <div className="flex items-center gap-2.5">
           <button
+            onClick={handlePickFolder}
+            disabled={isFetchingFolders || isLoading}
+            className="hitbox-48 px-4 py-2 rounded-full bg-amber-400/10 hover:bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer disabled:opacity-50 transition-colors"
+            title="Seleccionar otra carpeta de Google Drive usando Google Picker"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Cambiar Carpeta</span>
+            <span className="sm:hidden">Carpeta</span>
+          </button>
+
+          <button
             onClick={async () => {
               await onRefreshDrive();
               if (isAtRoot) {
@@ -339,8 +369,18 @@ export const DriveFolderExplorer: React.FC<DriveFolderExplorerProps> = ({
                   No hay canciones en {fullCurrentPath}
                 </p>
                 <p className="text-xs text-neutral-400 max-w-md mx-auto mt-1 leading-relaxed">
-                  Sube tus canciones (.mp3, .flac, .m4a) y carátulas a la carpeta correspondiente en tu Google Drive y pulsa "Sincronizar".
+                  Sube tus canciones (.mp3, .flac, .m4a) y carátulas a la carpeta correspondiente en tu Google Drive y pulsa "Sincronizar", o selecciona otra carpeta con música.
                 </p>
+                <div className="pt-3">
+                  <button
+                    onClick={handlePickFolder}
+                    disabled={isFetchingFolders || isLoading}
+                    className="hitbox-48 inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-amber-400 hover:bg-amber-300 text-black font-bold text-xs uppercase tracking-wider transition-all shadow-lg cursor-pointer"
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                    <span>Seleccionar Carpeta con Google Picker</span>
+                  </button>
+                </div>
               </div>
             </div>
           ) : (

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { cloudService } from '../services/cloudService';
 import { googleDriveProvider } from '../services/providers/GoogleDriveProvider';
+import { driveService } from '../services/driveService';
 import { CloudProviderType, CloudUserSession } from '../types';
 import { 
   X, 
@@ -34,15 +35,49 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onSuccess }) => {
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'drive' | 'guide'>('drive');
+  const [linkedFolderName, setLinkedFolderName] = useState<string>(
+    driveService.getSelectedMusicFolder()?.name || 'mimusica'
+  );
 
   const refreshSessions = () => {
     setSessions(cloudService.getAllSessions());
     setActiveProviderId(cloudService.getActiveProviderId());
+    setLinkedFolderName(driveService.getSelectedMusicFolder()?.name || 'mimusica');
   };
 
   useEffect(() => {
     refreshSessions();
   }, []);
+
+  const handlePickFolder = async () => {
+    setErrorMessage(null);
+    try {
+      const folder = await driveService.promptPickMusicFolder();
+      if (folder) {
+        setLinkedFolderName(folder.name);
+        setIsSyncing(true);
+        setSyncProgressPercent(15);
+        setSyncProgressStep(`Sincronizando carpeta /${folder.name}...`);
+        const res = await cloudService.syncLibrary('drive', (p) => {
+          setSyncProgressPercent(p.percent);
+          setSyncProgressStep(p.step);
+        });
+        setSyncProgressPercent(100);
+        setSyncStatus(`¡Carpeta vinculada con éxito! ${res.tracks.length} canciones sincronizadas.`);
+        onSuccess();
+      }
+    } catch (err: any) {
+      console.error('Error al seleccionar carpeta con Google Picker:', err);
+      setErrorMessage(err.message || 'No se pudo seleccionar la carpeta con Google Picker.');
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => {
+        setSyncStatus(null);
+        setSyncProgressPercent(0);
+        setSyncProgressStep('');
+      }, 4000);
+    }
+  };
 
   const handleConnectGoogle = async () => {
     setLoadingProvider('drive');
@@ -252,6 +287,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onSuccess }) => {
                     >
                       <LogOut className="w-3.5 h-3.5 shrink-0" />
                       <span className="hidden sm:inline">Desconectar</span>
+                    </button>
+                  </div>
+
+                  {/* Linked Folder Status & Google Picker Button */}
+                  <div className="p-3.5 rounded-2xl bg-black/60 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                        <FolderOpen className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <span className="text-[11px] text-neutral-400 block font-medium">Carpeta de música en Drive:</span>
+                        <span className="text-xs sm:text-sm font-bold text-white truncate block font-mono">
+                          /{linkedFolderName}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={handlePickFolder}
+                      disabled={isSyncing}
+                      className="hitbox-48 h-9 px-3.5 rounded-xl bg-amber-400/15 hover:bg-amber-400/25 text-amber-300 border border-amber-400/30 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                      title="Seleccionar otra carpeta en Google Drive usando Google Picker"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      <span>Elegir con Google Picker</span>
                     </button>
                   </div>
 
