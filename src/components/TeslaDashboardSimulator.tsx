@@ -233,16 +233,24 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
-  const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.preventDefault();
-    const val = parseFloat(e.target.value);
+  const handleSeekInput = (e: React.FormEvent<HTMLInputElement>) => {
+    const val = parseFloat((e.target as HTMLInputElement).value);
     setScrubValue(val);
     if (!isScrubbing) setIsScrubbing(true);
   };
 
-  const handleSeekCommit = () => {
+  const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = parseFloat(e.target.value);
+    setScrubValue(val);
     setIsScrubbing(false);
-    audioEngine.seek(scrubValue);
+    audioEngine.seekController.seekToSeconds(val);
+  };
+
+  const handleSeekCommit = () => {
+    if (isScrubbing) {
+      setIsScrubbing(false);
+      audioEngine.seekController.seekToSeconds(scrubValue);
+    }
   };
 
   const toggleFavorite = async (e?: React.MouseEvent) => {
@@ -537,7 +545,7 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
             </div>
           </div>
 
-          {/* B. PROGRESS SCRUBBER & OPTIONAL SKIP 15s CONTROLS */}
+          {/* B. PROGRESS SCRUBBER & DISCRETE SKIP ±15s CONTROLS */}
           <div className="w-full space-y-1.5 px-1">
             <div className="relative flex items-center">
               <input
@@ -546,6 +554,7 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                 max={effectiveMaxDuration}
                 step="0.1"
                 value={Math.min(currentPlayTime, effectiveMaxDuration)}
+                onInput={handleSeekInput}
                 onChange={handleSeekChange}
                 onMouseUp={handleSeekCommit}
                 onTouchEnd={handleSeekCommit}
@@ -573,13 +582,13 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                   type="button"
                   onClick={(e) => {
                     e.preventDefault();
-                    audioEngine.skipSeconds(-15);
+                    audioEngine.seekController.skip(-15);
                   }}
-                  className="px-2 py-0.5 rounded-md bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800 text-[10px] font-sans font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1"
+                  className="px-2.5 py-1 rounded-md bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-700/80 text-xs font-sans font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1 shadow-sm"
                   title="Rewind 15 seconds"
                   aria-label="-15 seconds"
                 >
-                  <RotateCcw className="w-3 h-3" />
+                  <RotateCcw className="w-3.5 h-3.5" />
                   <span>-15s</span>
                 </button>
               </div>
@@ -589,14 +598,14 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                   type="button"
                   onClick={(e) => {
                     e.preventDefault();
-                    audioEngine.skipSeconds(15);
+                    audioEngine.seekController.skip(15);
                   }}
-                  className="px-2 py-0.5 rounded-md bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800 text-[10px] font-sans font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1"
+                  className="px-2.5 py-1 rounded-md bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-700/80 text-xs font-sans font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1 shadow-sm"
                   title="Forward 15 seconds"
                   aria-label="+15 seconds"
                 >
                   <span>+15s</span>
-                  <RotateCw className="w-3 h-3" />
+                  <RotateCw className="w-3.5 h-3.5" />
                 </button>
                 <span>{knownDuration > 0 ? formatTime(knownDuration) : '--:--'}</span>
               </div>

@@ -16,14 +16,17 @@ import { driveService } from './driveService';
 import { cloudService } from './cloudService';
 import { authService } from './authService';
 import { preferencesService } from './preferencesService';
+import { PlaybackSeekController, AudioSeekEngine } from './playbackSeekController';
 
 type StateListener = (state: PlayerState) => void;
 type AuthRequiredListener = (provider: 'drive', track?: AudioTrack) => void;
 
-class AudioEngine {
+class AudioEngine implements AudioSeekEngine {
   private audioA: HTMLAudioElement;
   private audioB: HTMLAudioElement;
   private activePlayerIndex: 0 | 1 = 0; // 0 for audioA, 1 for audioB
+
+  public seekController: PlaybackSeekController;
 
   private audioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
@@ -81,7 +84,9 @@ class AudioEngine {
   private originalQueueOrder: AudioTrack[] = [];
   private retryCount = 0;
   private readonly MAX_RETRIES = 4;
-  private isCrossfading = false;
+  private isTransitioning = false;
+  private preprimedTrackId: string | null = null;
+  private isPrepriming = false;
   private crossfadeTimer: any = null;
   private silentCarrierStarted = false;
   private mediaSessionSyncInterval: any = null;
@@ -90,7 +95,13 @@ class AudioEngine {
   private fadeOutTimer: any = null;
   private lastSessionPersistTime = 0;
 
+  public get isCrossfading(): boolean {
+    return this.isTransitioning;
+  }
+
   constructor() {
+    this.seekController = new PlaybackSeekController(this);
+
     this.audioA = new Audio();
     this.audioA.preload = 'auto';
     this.audioA.crossOrigin = 'anonymous';
@@ -106,6 +117,10 @@ class AudioEngine {
     setTimeout(() => {
       this.restorePersistedSession();
     }, 300);
+  }
+
+  public getActiveAudioElement(): HTMLAudioElement | null {
+    return this.activeAudio;
   }
 
   public async restorePersistedSession() {
@@ -248,8 +263,14 @@ class AudioEngine {
       this.trebleFilter.type = 'highshelf';
       this.trebleFilter.frequency.value = 4000;
 
-      // Dynamics Compressor (Volume Normalization / Rebalance / Auto-gain)
+      // Dynamics Compressor (Master Limiter & Protection to eliminate clicks/clipping)
       this.compressor = this.audioContext.createDynamicsCompressor();
+      this.compressor.threshold.setValueAtTime(-12, this.audioContext.currentTime);
+      this.compressor.knee.setValueAtTime(30, this.audioContext.currentTime);
+      this.compressor.ratio.setValueAtTime(12, this.audioContext.currentTime);
+      this.compressor.attack.setValueAtTime(0.003, this.audioContext.currentTime);
+      this.compressor.release.setValueAtTime(0.25, this.audioContext.currentTime);
+
       this.normalizationGain = this.audioContext.createGain();
       this.normalizationGain.gain.setValueAtTime(1.0, this.audioContext.currentTime);
 
@@ -378,7 +399,7 @@ class AudioEngine {
     });
 
     audioEl.addEventListener('pause', () => {
-      if (this.activePlayerIndex === playerIndex && !this.isCrossfading) {
+      if (this.activePlayerIndex === playerIndex && !this.isTransitioning) {
         this.state.isPlaying = false;
         this.stopMediaSessionPositionSync();
         this.notifyListeners();
@@ -400,6 +421,42 @@ class AudioEngine {
           this.state.bufferedEnd = audioEl.buffered.end(audioEl.buffered.length - 1);
         }
 
+        const remaining = (audioEl.duration && isFinite(audioEl.duration)) ? audioEl.duration - audioEl.currentTime : 0;
+
+        // 1. Hardware Gapless Pre-Priming (when remaining <= 8 seconds)
+        // Warms up the idle audio channel with the next track's Blob URL and runs .load() with preload="auto"
+        if (
+          remaining > 0 &&
+          remaining <= 8 &&
+          !this.isPrepriming &&
+          !this.isTransitioning &&
+          this.state.isPlaying
+        ) {
+          const nextIdx = this.getNextTrackIndex();
+          if (nextIdx !== null && nextIdx !== this.state.currentTrackIndex) {
+            const nextTrack = this.state.queue[nextIdx];
+            if (nextTrack && this.preprimedTrackId !== nextTrack.id) {
+              this.preprimeNextTrack(nextTrack).catch(() => {});
+            }
+          }
+        }
+
+        // 2. Seamless Gapless / Crossfade Transition without Audio Focus drop
+        // Runs at remaining <= transitionDuration (or default 1.5s)
+        const transitionDuration = this.state.isCrossfadeEnabled
+          ? Math.max(1.0, this.state.crossfadeDuration)
+          : 1.5;
+
+        if (
+          remaining > 0 &&
+          remaining <= transitionDuration &&
+          !this.isTransitioning &&
+          this.state.isPlaying &&
+          audioEl.duration > transitionDuration * 1.5
+        ) {
+          this.performTransitionToNext(transitionDuration);
+        }
+
         // Lazy Buffering Guard: Start prefetching only after user has listened for >= 10s or 25% of track
         if (
           !this.hasTriggeredLazyPrefetch &&
@@ -407,17 +464,6 @@ class AudioEngine {
         ) {
           this.hasTriggeredLazyPrefetch = true;
           this.prefetchUpcomingTracks().catch(() => {});
-        }
-
-        // Check for Crossfade trigger
-        if (
-          this.state.isCrossfadeEnabled &&
-          !this.isCrossfading &&
-          this.state.duration > 0 &&
-          audioEl.currentTime >= this.state.duration - this.state.crossfadeDuration &&
-          this.state.duration > this.state.crossfadeDuration * 2
-        ) {
-          this.triggerCrossfadeToNext();
         }
 
         this.notifyListeners();
@@ -447,8 +493,13 @@ class AudioEngine {
     });
 
     audioEl.addEventListener('ended', () => {
-      if (this.activePlayerIndex === playerIndex && !this.isCrossfading) {
-        this.handleTrackEnded();
+      if (this.activePlayerIndex === playerIndex && !this.isTransitioning) {
+        if (this.state.playbackMode === 'repeat_one') {
+          audioEl.currentTime = 0;
+          audioEl.play().catch(() => {});
+        } else {
+          this.performTransitionToNext(1.5);
+        }
       }
     });
 
@@ -554,7 +605,7 @@ class AudioEngine {
     }
   }
 
-  private updateMediaSessionPosition() {
+  public updateMediaSessionPosition() {
     if (
       typeof window !== 'undefined' &&
       'mediaSession' in navigator &&
@@ -813,11 +864,79 @@ class AudioEngine {
   }
 
   /**
-   * Seamless Crossfade / Fade Transition to Any Target Track Index
+   * Hardware Gapless Pre-Priming: Warms up inactive channel with next track's Blob URL
+   * Runs .load() with preload="auto" to warm up the physical codec in hardware.
    */
-  public async transitionToTrackIndex(targetIdx: number) {
+  public async preprimeNextTrack(nextTrack: AudioTrack) {
+    if (!nextTrack || this.isPrepriming || this.isTransitioning) return;
+    this.isPrepriming = true;
+
+    try {
+      this.initWebAudio();
+      const inactiveAudio = this.inactiveAudio;
+      const inactiveGain = this.inactiveGainNode;
+
+      if (this.audioContext && inactiveGain) {
+        const now = this.audioContext.currentTime;
+        inactiveGain.gain.cancelScheduledValues(now);
+        inactiveGain.gain.setValueAtTime(0.0001, now);
+      }
+
+      const streamUrl = await this.getTrackStreamUrl(nextTrack);
+      if (streamUrl && !this.isTransitioning) {
+        inactiveAudio.crossOrigin = 'anonymous';
+        inactiveAudio.preload = 'auto';
+        inactiveAudio.src = streamUrl;
+        inactiveAudio.load(); // Forces physical hardware codec warm-up
+        this.preprimedTrackId = nextTrack.id;
+      }
+    } catch (err) {
+      console.warn('[AudioEngine] Error en pre-priming de códec:', err);
+      this.preprimedTrackId = null;
+    } finally {
+      this.isPrepriming = false;
+      this.enforceRamQuota();
+    }
+  }
+
+  /**
+   * Deterministic RAM Quota Enforcement: Strictly max 2 Blob URLs active in RAM.
+   * Evicts older URLs deterministically via URL.revokeObjectURL.
+   */
+  public enforceRamQuota() {
+    const currentTrack = this.getCurrentTrack();
+    const nextIdx = this.getNextTrackIndex();
+    const nextTrack = nextIdx !== null ? this.state.queue[nextIdx] : null;
+
+    const currentFileId = currentTrack?.cloudFileId || currentTrack?.driveFileId || '';
+    const nextFileId = nextTrack?.cloudFileId || nextTrack?.driveFileId || '';
+
+    driveService.evictOldBlobsExcept([currentFileId, nextFileId]);
+  }
+
+  /**
+   * Automated Seamless Transition to Next Track without Audio Focus loss
+   */
+  public async performTransitionToNext(duration: number = 1.5) {
+    if (this.isTransitioning) return;
+
+    const nextIdx = this.getNextTrackIndex();
+    if (nextIdx === null) {
+      this.pause();
+      this.seek(0);
+      return;
+    }
+
+    await this.transitionToTrackIndex(nextIdx, duration);
+  }
+
+  /**
+   * Seamless Dual Audio Transition to Any Target Track Index
+   * Guarantees zero pops, zero dropouts, and continuous in-vehicle Audio Focus.
+   */
+  public async transitionToTrackIndex(targetIdx: number, forcedDuration?: number) {
     if (targetIdx < 0 || targetIdx >= this.state.queue.length) return;
-    if (targetIdx === this.state.currentTrackIndex && this.state.isPlaying) return;
+    if (targetIdx === this.state.currentTrackIndex && this.state.isPlaying && !forcedDuration) return;
 
     const targetTrack = this.state.queue[targetIdx];
     if (!targetTrack) return;
@@ -825,7 +944,7 @@ class AudioEngine {
     if (this.isTrackRequiringAuth(targetTrack)) {
       const refreshed = await authService.refreshAccessTokenSilently();
       if (!refreshed && this.isTrackRequiringAuth(targetTrack)) {
-        this.isCrossfading = false;
+        this.isTransitioning = false;
         this.state.isLoading = false;
         this.state.isPlaying = false;
         this.state.currentTrackIndex = targetIdx;
@@ -836,19 +955,26 @@ class AudioEngine {
       }
     }
 
-    // If not currently playing or both transitions disabled, perform standard direct play
-    const shouldUseTransition = this.state.isPlaying && (this.state.isCrossfadeEnabled || this.state.isFadeInOutEnabled);
-    if (!shouldUseTransition) {
+    // If not currently playing, start direct playback
+    if (!this.state.isPlaying) {
       this.state.currentTrackIndex = targetIdx;
       await this.playCurrentTrack();
       return;
     }
 
-    const duration = this.state.isCrossfadeEnabled
-      ? this.state.crossfadeDuration
-      : this.state.fadeInOutDuration;
+    const duration = forcedDuration !== undefined
+      ? forcedDuration
+      : (this.state.isCrossfadeEnabled
+          ? Math.max(1.0, this.state.crossfadeDuration)
+          : (this.state.isFadeInOutEnabled ? Math.min(this.state.fadeInOutDuration, 2.0) : 1.5));
 
-    this.isCrossfading = true;
+    this.isTransitioning = true;
+    this.initWebAudio();
+
+    if (this.audioContext && this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+
     const nextPlayerIndex = this.activePlayerIndex === 0 ? 1 : 0;
     const incomingAudio = nextPlayerIndex === 0 ? this.audioA : this.audioB;
     const outgoingAudio = this.activeAudio;
@@ -856,66 +982,71 @@ class AudioEngine {
     const outgoingGain = this.activeGainNode;
 
     try {
-      if (this.audioContext && this.audioContext.state === 'suspended') {
-        await this.audioContext.resume();
+      // If incoming audio does not have the target track primed yet, load it immediately
+      if (this.preprimedTrackId !== targetTrack.id || !incomingAudio.src) {
+        const streamUrl = await this.getTrackStreamUrl(targetTrack);
+        if (!streamUrl) throw new Error('No stream URL available');
+        incomingAudio.crossOrigin = 'anonymous';
+        incomingAudio.preload = 'auto';
+        incomingAudio.src = streamUrl;
       }
 
-      const streamUrl = await this.getTrackStreamUrl(targetTrack);
-      if (!streamUrl) throw new Error('No stream URL available');
-
-      incomingAudio.src = streamUrl;
       incomingAudio.playbackRate = this.state.playbackRate;
+      incomingAudio.currentTime = 0;
 
       const now = this.audioContext ? this.audioContext.currentTime : 0;
 
-      if (this.audioContext && incomingGain && outgoingGain) {
-        incomingGain.gain.cancelScheduledValues(now);
-        incomingGain.gain.setValueAtTime(0.0001, now);
-        incomingGain.gain.linearRampToValueAtTime(1.0, now + duration);
-
+      // 1. Descending volume ramp on outgoing channel (prevents pops / clicks)
+      if (this.audioContext && outgoingGain) {
         outgoingGain.gain.cancelScheduledValues(now);
         outgoingGain.gain.setValueAtTime(outgoingGain.gain.value || 1.0, now);
         outgoingGain.gain.linearRampToValueAtTime(0.0001, now + duration);
       }
 
+      // 2. Ascending volume ramp on incoming channel simultaneously (0 to 1)
+      if (this.audioContext && incomingGain) {
+        incomingGain.gain.cancelScheduledValues(now);
+        incomingGain.gain.setValueAtTime(0.0001, now);
+        incomingGain.gain.linearRampToValueAtTime(1.0, now + duration);
+      }
+
+      // 3. Immediately start playing incoming channel so audio stream never drops to zero
       await incomingAudio.play();
 
+      // 4. Update active channel and state immediately
       this.activePlayerIndex = nextPlayerIndex;
       this.state.currentTrackIndex = targetIdx;
       this.state.currentTime = 0;
       this.state.duration = targetTrack.duration || 0;
+      this.state.isPlaying = true;
+      this.state.isLoading = false;
       this.updateMediaSessionMetadata(targetTrack);
       this.notifyListeners();
-      await dbService.logTrackPlayed(targetTrack.id);
+      dbService.logTrackPlayed(targetTrack.id).catch(() => {});
 
-      // Strict RAM Management: Evict all dormant Blob URLs except current and immediate next track
-      const nextUpcomingIdx = this.getNextTrackIndex();
-      const nextUpcomingTrack = nextUpcomingIdx !== null ? this.state.queue[nextUpcomingIdx] : null;
-      const currentFileId = targetTrack.cloudFileId || targetTrack.driveFileId || '';
-      const nextFileId = nextUpcomingTrack?.cloudFileId || nextUpcomingTrack?.driveFileId || '';
-      driveService.evictOldBlobsExcept([currentFileId, nextFileId]);
+      // 5. Enforce RAM quota
+      this.enforceRamQuota();
 
-      // Lazy Buffering: Delay background cellular prefetching until user listens for 10s or 25% of track
-      this.scheduleLazyPrefetch();
-
+      // 6. Complete transition: pause outgoing audio, clean src and call load() to free decoder RAM
       if (this.crossfadeTimer) clearTimeout(this.crossfadeTimer);
       this.crossfadeTimer = setTimeout(() => {
         outgoingAudio.pause();
-        outgoingAudio.currentTime = 0;
-        this.isCrossfading = false;
+        outgoingAudio.removeAttribute('src');
+        outgoingAudio.load();
+        this.isTransitioning = false;
+        this.preprimedTrackId = null;
+        this.enforceRamQuota();
       }, duration * 1000);
-    } catch (e) {
-      console.warn('Transition execution failed, falling back to standard playback:', e);
-      this.isCrossfading = false;
+    } catch (err) {
+      console.warn('[AudioEngine] Transition failed, fallback to direct play:', err);
+      this.isTransitioning = false;
       this.state.currentTrackIndex = targetIdx;
       await this.playCurrentTrack();
     }
   }
 
   private async triggerCrossfadeToNext() {
-    const nextIdx = this.getNextTrackIndex();
-    if (nextIdx === null || nextIdx === this.state.currentTrackIndex) return;
-    await this.transitionToTrackIndex(nextIdx);
+    await this.performTransitionToNext(this.state.crossfadeDuration);
   }
 
   private getNextTrackIndex(): number | null {
@@ -1046,7 +1177,7 @@ class AudioEngine {
 
     const nextIndex = this.getNextTrackIndex();
     if (nextIndex !== null) {
-      await this.transitionToTrackIndex(nextIndex);
+      await this.transitionToTrackIndex(nextIndex, 0.5);
     } else {
       this.pause();
       this.seek(0);
@@ -1070,7 +1201,7 @@ class AudioEngine {
     }
 
     if (prevIndex !== -1) {
-      await this.transitionToTrackIndex(prevIndex);
+      await this.transitionToTrackIndex(prevIndex, 0.5);
     } else {
       this.seek(0);
     }
@@ -1081,21 +1212,20 @@ class AudioEngine {
       this.seek(0);
       this.play();
     } else {
-      this.next();
+      this.performTransitionToNext(1.5);
     }
   }
 
   public seek(seconds: number) {
-    if (!isNaN(seconds) && isFinite(seconds)) {
-      this.activeAudio.currentTime = Math.max(0, Math.min(seconds, this.activeAudio.duration || 0));
-      this.state.currentTime = this.activeAudio.currentTime;
-      this.notifyListeners();
-      this.updateMediaSessionPosition();
-    }
+    this.seekController.seekToSeconds(seconds);
+  }
+
+  public seekPercent(percent: number) {
+    this.seekController.seekToPercent(percent);
   }
 
   public skipSeconds(seconds: number) {
-    this.seek(this.activeAudio.currentTime + seconds);
+    this.seekController.skip(seconds);
   }
 
   public setVolume(vol: number) {
@@ -1294,11 +1424,11 @@ class AudioEngine {
     const now = this.audioContext.currentTime;
 
     if (!this.state.isNormalizationEnabled) {
-      // Bypass compression
-      this.compressor.threshold.setValueAtTime(0, now);
-      this.compressor.knee.setValueAtTime(0, now);
-      this.compressor.ratio.setValueAtTime(1, now);
-      this.compressor.attack.setValueAtTime(0.01, now);
+      // Default Master Protection Limiter settings (eliminates distortion, pops & clicks)
+      this.compressor.threshold.setValueAtTime(-12, now);
+      this.compressor.knee.setValueAtTime(30, now);
+      this.compressor.ratio.setValueAtTime(12, now);
+      this.compressor.attack.setValueAtTime(0.003, now);
       this.compressor.release.setValueAtTime(0.25, now);
       this.normalizationGain.gain.setValueAtTime(1.0, now);
       return;
@@ -1392,21 +1522,12 @@ class AudioEngine {
 
     // Hardware Gapless Pre-Priming: Pre-warm the inactive audio element with the immediate next track's URL
     // so hardware audio codecs and decoders are ready in RAM without startup latency stutter
-    if (this.state.queue.length > 0 && !this.isCrossfading) {
+    if (this.state.queue.length > 0 && !this.isTransitioning) {
       const nextIdx = this.getNextTrackIndex();
       if (nextIdx !== null && nextIdx !== this.state.currentTrackIndex) {
         const nextTrack = this.state.queue[nextIdx];
         if (nextTrack) {
-          this.getTrackStreamUrl(nextTrack).then((nextUrl) => {
-            if (nextUrl && !this.isCrossfading) {
-              const inactiveAudio = this.activePlayerIndex === 0 ? this.audioB : this.audioA;
-              if (inactiveAudio.src !== nextUrl) {
-                inactiveAudio.src = nextUrl;
-                inactiveAudio.preload = 'auto';
-                inactiveAudio.load();
-              }
-            }
-          }).catch(() => {});
+          this.preprimeNextTrack(nextTrack).catch(() => {});
         }
       }
     }
@@ -1490,7 +1611,7 @@ class AudioEngine {
     return () => this.listeners.delete(listener);
   }
 
-  private notifyListeners() {
+  public notifyListeners() {
     const s = this.getState();
     this.listeners.forEach((l) => l(s));
   }
