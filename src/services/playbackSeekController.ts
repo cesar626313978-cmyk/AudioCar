@@ -14,6 +14,7 @@ export class PlaybackSeekController {
   private engine: AudioSeekEngine;
   public isSeeking: boolean = false;
   private seekDebounceTimer: any = null;
+  private watchdogTimer: any = null;
   public readonly SAFETY_MARGIN_SECONDS: number = 2.5; // Margen para evitar EOF crash
 
   constructor(audioEngine: AudioSeekEngine) {
@@ -36,7 +37,7 @@ export class PlaybackSeekController {
 
     // Calcula la nueva posición con límites estrictos de seguridad
     let targetTime = current + deltaSeconds;
-    targetTime = Math.max(0, Math.min(targetTime, duration - this.SAFETY_MARGIN_SECONDS));
+    targetTime = Math.max(0, Math.min(targetTime, Math.max(0, duration - this.SAFETY_MARGIN_SECONDS)));
 
     this.executeSafeSeek(audio, targetTime);
   }
@@ -56,7 +57,7 @@ export class PlaybackSeekController {
     const requestedTime = (Math.max(0, Math.min(targetPercentage, 100)) / 100) * duration;
 
     // Clamp estricto con margen de seguridad
-    const safeTarget = Math.max(0, Math.min(requestedTime, duration - this.SAFETY_MARGIN_SECONDS));
+    const safeTarget = Math.max(0, Math.min(requestedTime, Math.max(0, duration - this.SAFETY_MARGIN_SECONDS)));
 
     if (this.seekDebounceTimer) {
       clearTimeout(this.seekDebounceTimer);
@@ -79,7 +80,7 @@ export class PlaybackSeekController {
     }
 
     const duration = audio.duration;
-    const safeTarget = Math.max(0, Math.min(targetSeconds, duration - this.SAFETY_MARGIN_SECONDS));
+    const safeTarget = Math.max(0, Math.min(targetSeconds, Math.max(0, duration - this.SAFETY_MARGIN_SECONDS)));
 
     if (this.seekDebounceTimer) {
       clearTimeout(this.seekDebounceTimer);
@@ -88,6 +89,25 @@ export class PlaybackSeekController {
     this.seekDebounceTimer = setTimeout(() => {
       this.executeSafeSeek(audio, safeTarget);
     }, 120);
+  }
+
+  /**
+   * Ejecución inmediata segura (cancela debounce en vuelo) al soltar el deslizador
+   */
+  public seekImmediate(targetSeconds: number): void {
+    if (this.seekDebounceTimer) {
+      clearTimeout(this.seekDebounceTimer);
+      this.seekDebounceTimer = null;
+    }
+
+    const audio = this.engine.getActiveAudioElement();
+    if (!audio || isNaN(audio.duration) || !isFinite(audio.duration) || audio.duration <= 0) {
+      return;
+    }
+
+    const duration = audio.duration;
+    const safeTarget = Math.max(0, Math.min(targetSeconds, Math.max(0, duration - this.SAFETY_MARGIN_SECONDS)));
+    this.executeSafeSeek(audio, safeTarget);
   }
 
   /**
@@ -102,15 +122,25 @@ export class PlaybackSeekController {
         const canSeek = this.isTimeWithinRanges(targetTime, audio.seekable);
         if (!canSeek) {
           // Si cae fuera del rango decodificado, ajusta al borde inferior del último rango
-          targetTime = audio.seekable.end(audio.seekable.length - 1) - 0.5;
+          const lastIdx = audio.seekable.length - 1;
+          const safeEnd = audio.seekable.end(lastIdx) - 0.5;
+          targetTime = Math.max(0, safeEnd);
         }
       }
 
       this.isSeeking = true;
 
-      const onSeeked = () => {
+      const cleanup = () => {
+        if (this.watchdogTimer) {
+          clearTimeout(this.watchdogTimer);
+          this.watchdogTimer = null;
+        }
         audio.removeEventListener('seeked', onSeeked);
         this.isSeeking = false;
+      };
+
+      const onSeeked = () => {
+        cleanup();
 
         // Sincronizar Media Session API tras la reubicación
         if (typeof navigator !== 'undefined' && 'mediaSession' in navigator && !isNaN(audio.duration)) {
@@ -128,10 +158,19 @@ export class PlaybackSeekController {
         }
       };
 
+      // Watchdog a 600ms por si el evento 'seeked' no se emite en el hardware de audio
+      this.watchdogTimer = setTimeout(() => {
+        cleanup();
+      }, 600);
+
       audio.addEventListener('seeked', onSeeked, { once: true });
       audio.currentTime = targetTime;
     } catch (err) {
       this.isSeeking = false;
+      if (this.watchdogTimer) {
+        clearTimeout(this.watchdogTimer);
+        this.watchdogTimer = null;
+      }
       console.error('[AudioSeekController] Error al ejecutar currentTime:', err);
     }
   }

@@ -233,24 +233,26 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
-  const handleSeekInput = (e: React.FormEvent<HTMLInputElement>) => {
+  const handleSeekDrag = (e: React.ChangeEvent<HTMLInputElement> | React.FormEvent<HTMLInputElement>) => {
     const val = parseFloat((e.target as HTMLInputElement).value);
-    setScrubValue(val);
-    if (!isScrubbing) setIsScrubbing(true);
-  };
-
-  const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = parseFloat(e.target.value);
-    setScrubValue(val);
-    setIsScrubbing(false);
-    audioEngine.seekController.seekToSeconds(val);
-  };
-
-  const handleSeekCommit = () => {
-    if (isScrubbing) {
-      setIsScrubbing(false);
-      audioEngine.seekController.seekToSeconds(scrubValue);
+    if (!isNaN(val)) {
+      setScrubValue(val);
+      if (!isScrubbing) {
+        setIsScrubbing(true);
+      }
     }
+  };
+
+  const handleSeekCommit = (e?: React.SyntheticEvent<HTMLInputElement> | React.PointerEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement> | React.MouseEvent<HTMLInputElement>) => {
+    let targetSecs = scrubValue;
+    if (e && (e.target as HTMLInputElement)?.value !== undefined) {
+      const parsed = parseFloat((e.target as HTMLInputElement).value);
+      if (!isNaN(parsed)) {
+        targetSecs = parsed;
+      }
+    }
+    setIsScrubbing(false);
+    audioEngine.seekController.seekImmediate(targetSecs);
   };
 
   const toggleFavorite = async (e?: React.MouseEvent) => {
@@ -569,10 +571,12 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                 max={effectiveMaxDuration}
                 step="0.1"
                 value={Math.min(currentPlayTime, effectiveMaxDuration)}
-                onInput={handleSeekInput}
-                onChange={handleSeekChange}
-                onMouseUp={handleSeekCommit}
+                onInput={handleSeekDrag}
+                onChange={handleSeekDrag}
+                onPointerUp={handleSeekCommit}
                 onTouchEnd={handleSeekCommit}
+                onMouseUp={handleSeekCommit}
+                onKeyUp={handleSeekCommit}
                 className="automotive-slider w-full h-7 z-10 cursor-pointer"
                 aria-label="Playback position"
               />
@@ -599,7 +603,7 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                     e.preventDefault();
                     audioEngine.seekController.skip(-15);
                   }}
-                  className="px-2.5 py-1 rounded-md bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-700/80 text-xs font-sans font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1 shadow-sm"
+                  className="px-3 py-1.5 rounded-lg bg-neutral-900/90 hover:bg-neutral-800 text-neutral-200 hover:text-white border border-neutral-700/80 text-xs font-sans font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1.5 shadow-sm"
                   title="Rewind 15 seconds"
                   aria-label="-15 seconds"
                 >
@@ -615,7 +619,7 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
                     e.preventDefault();
                     audioEngine.seekController.skip(15);
                   }}
-                  className="px-2.5 py-1 rounded-md bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-700/80 text-xs font-sans font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1 shadow-sm"
+                  className="px-3 py-1.5 rounded-lg bg-neutral-900/90 hover:bg-neutral-800 text-neutral-200 hover:text-white border border-neutral-700/80 text-xs font-sans font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1.5 shadow-sm"
                   title="Forward 15 seconds"
                   aria-label="+15 seconds"
                 >
