@@ -412,6 +412,10 @@ class AuthService {
     this.notifyListeners();
   }
 
+  public async logout(): Promise<void> {
+    return this.signOut();
+  }
+
   public getUser(): DriveAuthUser | null {
     if (this.currentUser) {
       // If expired or about to expire, trigger background refresh

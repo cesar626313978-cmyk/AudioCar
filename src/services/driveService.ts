@@ -11,6 +11,7 @@ import { authService } from './authService';
 import { dbService } from './dbService';
 import { fetchWithDriveBackoff } from './driveBackoff';
 import { googlePickerService } from './googlePickerService';
+import { preferencesService } from './preferencesService';
 
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
 export const MUSIC_ROOT_FOLDER_NAME = 'mimusica';
@@ -61,11 +62,23 @@ export class DriveService {
   public getSelectedMusicFolder(): DriveFolder | null {
     try {
       const raw = localStorage.getItem(SELECTED_FOLDER_STORAGE_KEY);
-      if (!raw) return null;
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
+      if (raw) return JSON.parse(raw);
+    } catch {}
+
+    // Fallback to preferencesService master pointer
+    try {
+      const prefs = preferencesService.getCurrentPreferences();
+      if (prefs.selectedFolderId && prefs.selectedFolderName) {
+        return {
+          id: prefs.selectedFolderId,
+          name: prefs.selectedFolderName,
+          parentId: 'root',
+          path: `/${prefs.selectedFolderName}`
+        };
+      }
+    } catch {}
+
+    return null;
   }
 
   /**
@@ -79,6 +92,9 @@ export class DriveService {
       } catch (e) {
         console.warn('Could not save selected folder:', e);
       }
+      preferencesService.updateCurrentPreference('selectedFolderId', folder.id);
+      preferencesService.updateCurrentPreference('selectedFolderName', folder.name);
+      dbService.saveFolders([folder]).catch(() => {});
       this.folderDetailsCache.set(folder.id, {
         id: folder.id,
         name: folder.name,
@@ -87,6 +103,8 @@ export class DriveService {
       });
     } else {
       localStorage.removeItem(SELECTED_FOLDER_STORAGE_KEY);
+      preferencesService.updateCurrentPreference('selectedFolderId', undefined as any);
+      preferencesService.updateCurrentPreference('selectedFolderName', undefined as any);
     }
   }
 
@@ -311,9 +329,65 @@ export class DriveService {
     return null;
   }
 
+  private async executeDriveQuery(query: string, fields: string, token: string) {
+    const url = new URL('https://www.googleapis.com/drive/v3/files');
+    url.searchParams.set('q', query);
+    url.searchParams.set('fields', fields);
+    url.searchParams.set('pageSize', '1000');
+    url.searchParams.set('supportsAllDrives', 'true');
+    url.searchParams.set('includeItemsFromAllDrives', 'true');
+
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) throw new Error(`Drive API Error: ${res.status} ${res.statusText}`);
+    return await res.json();
+  }
+
+  // Carga carpetas y pistas en paralelo optimizando cuota (100 unidades c/u)
+  public async fetchLibraryHierarchy(rootFolderId: string, token: string) {
+    const folderFields = 'nextPageToken, files(id, name, parents)';
+    const trackFields = 'nextPageToken, files(id, name, size, mimeType, parents, modifiedTime, thumbnailLink, videoMediaMetadata)';
+
+    const [foldersResponse, tracksResponse] = await Promise.all([
+      // 1. Obtener todas las subcarpetas que pertenezcan al árbol
+      this.executeDriveQuery(
+        `mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+        folderFields,
+        token
+      ),
+      // 2. Obtener únicamente archivos de audio evitando el escaneo binario
+      this.executeDriveQuery(
+        `mimeType contains 'audio/' and trashed = false`,
+        trackFields,
+        token
+      )
+    ]);
+
+    // Filtrado en memoria del cliente: sin impacto en red ni cuota de Drive
+    const validFolderIds = new Set<string>([rootFolderId]);
+    let added = true;
+    while (added) {
+      added = false;
+      const fList = foldersResponse?.files || [];
+      for (const f of fList) {
+        if (f.parents && f.parents.some((p: string) => validFolderIds.has(p)) && !validFolderIds.has(f.id)) {
+          validFolderIds.add(f.id);
+          added = true;
+        }
+      }
+    }
+
+    const filteredFolders = (foldersResponse?.files || []).filter((f: any) => validFolderIds.has(f.id));
+    const filteredTracks = (tracksResponse?.files || []).filter((t: any) => 
+      t.parents && t.parents.some((p: string) => validFolderIds.has(p))
+    );
+
+    return { folders: filteredFolders, tracks: filteredTracks };
+  }
+
   /**
-   * Recursively discovers all subfolders under root and constructs their paths.
-   * Uses complete pagination (nextPageToken) to discover 100% of nested directories.
+   * Discovers all subfolders under root using flat query and constructs their paths in memory.
    */
   async getAllSubfoldersHierarchy(rootFolder: DriveFolder): Promise<Map<string, { id: string; name: string; parentId?: string; path: string }>> {
     const token = authService.getAccessToken();
@@ -328,47 +402,18 @@ export class DriveService {
 
     if (!token) return folderMap;
 
-    const queue: { id: string; path: string }[] = [{ id: rootFolder.id, path: `/${rootFolder.name}` }];
-
     try {
-      while (queue.length > 0) {
-        const currentBatch = queue.splice(0, 15);
-        const parentConditions = currentBatch.map((item) => `'${item.id}' in parents`).join(' or ');
-        const q = encodeURIComponent(`mimeType = 'application/vnd.google-apps.folder' and trashed = false and (${parentConditions})`);
-        
-        let pageToken: string | undefined = undefined;
-        do {
-          const pageParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
-          const url = `${DRIVE_API_URL}/files?q=${q}&fields=nextPageToken,files(id, name, parents)&pageSize=1000${pageParam}`;
-
-          const res = await fetchWithDriveBackoff(url, { headers: this.getHeaders(token) });
-          if (!res.ok) break;
-
-          const data = await res.json();
-          pageToken = data.nextPageToken;
-          const childFolders = data.files || [];
-
-          for (const f of childFolders) {
-            const parentId = f.parents?.[0] || rootFolder.id;
-            const parentPath = folderMap.get(parentId)?.path || `/${rootFolder.name}`;
-            const childPath = `${parentPath}/${f.name}`;
-
-            if (!folderMap.has(f.id)) {
-              const info = {
-                id: f.id,
-                name: f.name,
-                parentId,
-                path: childPath
-              };
-              folderMap.set(f.id, info);
-              this.folderDetailsCache.set(f.id, info);
-              queue.push({ id: f.id, path: childPath });
-            }
-          }
-        } while (pageToken);
+      const { folders } = await this.fetchLibraryHierarchy(rootFolder.id, token);
+      for (const f of folders) {
+        const parentId = f.parents?.[0] || rootFolder.id;
+        const parentPath = folderMap.get(parentId)?.path || `/${rootFolder.name}`;
+        const childPath = `${parentPath}/${f.name}`;
+        const info = { id: f.id, name: f.name, parentId, path: childPath };
+        folderMap.set(f.id, info);
+        this.folderDetailsCache.set(f.id, info);
       }
     } catch (e) {
-      console.warn('Error during recursive subfolder discovery:', e);
+      console.warn('Error during single-jump subfolder discovery:', e);
     }
 
     return folderMap;
@@ -394,78 +439,48 @@ export class DriveService {
       return [];
     }
 
-    onProgress?.({ percent: 35, step: 'Explorando subcarpetas de música...' });
-    // Discover full folder hierarchy
-    const hierarchy = await this.getAllSubfoldersHierarchy(musicRoot);
+    onProgress?.({ percent: 35, step: 'Explorando biblioteca en 1 solo salto...' });
+    const { folders: flatFolders, tracks: flatTracks } = await this.fetchLibraryHierarchy(musicRoot.id, token);
 
-    let targetFolderIds: string[] = [];
+    // Build hierarchy map entirely in memory
+    const hierarchy = new Map<string, { id: string; name: string; parentId?: string; path: string }>();
+    hierarchy.set(musicRoot.id, {
+      id: musicRoot.id,
+      name: musicRoot.name,
+      parentId: 'root',
+      path: `/${musicRoot.name}`
+    });
 
-    if (folderId && folderId !== 'root' && folderId !== 'root_all') {
-      targetFolderIds = [folderId];
-    } else {
-      targetFolderIds = Array.from(hierarchy.keys());
+    for (const f of flatFolders) {
+      const parentId = f.parents?.[0] || musicRoot.id;
+      const parentPath = hierarchy.get(parentId)?.path || `/${musicRoot.name}`;
+      const childPath = `${parentPath}/${f.name}`;
+      const info = { id: f.id, name: f.name, parentId, path: childPath };
+      hierarchy.set(f.id, info);
+      this.folderDetailsCache.set(f.id, info);
     }
 
-    if (targetFolderIds.length === 0) return [];
+    // Persist discovered folders into local IndexedDB
+    const driveFoldersToSave: DriveFolder[] = [
+      musicRoot,
+      ...flatFolders.map((f: any) => ({
+        id: f.id,
+        name: f.name,
+        parentId: f.parents?.[0] || musicRoot.id,
+        path: hierarchy.get(f.id)?.path || `/${musicRoot.name}/${f.name}`
+      }))
+    ];
+    dbService.saveFolders(driveFoldersToSave).catch(() => {});
 
-    onProgress?.({ percent: 50, step: `Buscando pistas de audio en ${targetFolderIds.length} carpeta(s)...` });
+    onProgress?.({ percent: 60, step: `Filtrando ${flatTracks.length} canciones en memoria...` });
 
-    const chunkSize = 10;
-    const allFiles: any[] = [];
-
-    for (let i = 0; i < targetFolderIds.length; i += chunkSize) {
-      const batchIds = targetFolderIds.slice(i, i + chunkSize);
-      const parentFilter = batchIds.map((id) => `'${id}' in parents`).join(' or ');
-
-      const batchProgressPercent = Math.min(75, Math.round(50 + ((i + 1) / targetFolderIds.length) * 25));
-      onProgress?.({
-        percent: batchProgressPercent,
-        step: `Leyendo archivos de audio (${allFiles.length} canciones encontradas)...`
-      });
-
-      // Query all non-folder files within these parent folders
-      let queryParts = [
-        `trashed = false`,
-        `mimeType != 'application/vnd.google-apps.folder'`,
-        `(${parentFilter})`
-      ];
-
-      if (searchFilter && searchFilter.trim()) {
-        const cleanFilter = searchFilter.replace(/'/g, "\\'");
-        queryParts.push(`name contains '${cleanFilter}'`);
-      }
-
-      const q = encodeURIComponent(queryParts.join(' and '));
-      const fields = encodeURIComponent('nextPageToken, files(id, name, mimeType, size, modifiedTime, thumbnailLink, webContentLink, parents, videoMediaMetadata)');
-      
-      let pageToken: string | undefined = undefined;
-
-      try {
-        do {
-          const pageParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
-          const url = `${DRIVE_API_URL}/files?q=${q}&fields=${fields}&pageSize=1000&orderBy=name${pageParam}`;
-
-          const res = await fetchWithDriveBackoff(url, { headers: this.getHeaders(token) });
-          if (!res.ok) {
-            if (res.status === 401) {
-              authService.signOut();
-              throw new Error('Sesión expirada. Inicia sesión nuevamente.');
-            }
-            const errorData = await res.json().catch(() => ({}));
-            console.warn('Drive query error:', errorData);
-            break;
-          }
-
-          const data = await res.json();
-          pageToken = data.nextPageToken;
-
-          if (data.files && Array.isArray(data.files)) {
-            allFiles.push(...data.files);
-          }
-        } while (pageToken);
-      } catch (err: any) {
-        console.error('Batch audio list error:', err);
-      }
+    let allFiles = flatTracks;
+    if (folderId && folderId !== 'root' && folderId !== 'root_all') {
+      allFiles = flatTracks.filter((t: any) => t.parents && t.parents.includes(folderId));
+    }
+    if (searchFilter && searchFilter.trim()) {
+      const cleanLower = searchFilter.toLowerCase().trim();
+      allFiles = allFiles.filter((t: any) => (t.name || '').toLowerCase().includes(cleanLower));
     }
 
     // 1. Separate audio files and companion image files directly from allFiles

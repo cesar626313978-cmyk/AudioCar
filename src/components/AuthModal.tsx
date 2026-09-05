@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { cloudService } from '../services/cloudService';
 import { googleDriveProvider } from '../services/providers/GoogleDriveProvider';
 import { driveService } from '../services/driveService';
+import { audioEngine } from '../services/audioEngine';
 import { CloudProviderType, CloudUserSession } from '../types';
 import { 
   X, 
@@ -147,6 +148,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onSuccess }) => {
   const handleDisconnect = async () => {
     setLoadingProvider('drive');
     try {
+      audioEngine.stop();
+      audioEngine.purgeMemoryBuffers();
       await cloudService.logoutProvider('drive');
       refreshSessions();
       onSuccess();

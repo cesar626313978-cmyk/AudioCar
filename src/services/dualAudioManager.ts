@@ -1,7 +1,10 @@
 /**
  * DualAudioManager.ts
  * Arquitectura de Doble Buffer para Gapless Playback y mitigación de pérdida de Audio Focus.
+ * Incluye pipeline de reproducción con memoria acotada (máximo 2 Blobs).
  */
+
+import { AudioTrack } from '../types';
 
 export interface DualAudioChannel {
   id: string;
@@ -19,6 +22,11 @@ export interface DualAudioManagerOptions {
 }
 
 export class DualAudioManager {
+  private activeBlobs: Map<string, string> = new Map(); // trackId -> blobUrl
+  private audioA: HTMLAudioElement;
+  private audioB: HTMLAudioElement;
+  private currentActivePlayer: 'A' | 'B' = 'A';
+
   public crossfadeDuration: number;
   public onTrackEnded?: (nextTrack: any) => void;
   public onTimeUpdate?: (currentTime: number, duration: number) => void;
@@ -66,9 +74,12 @@ export class DualAudioManager {
     // Instanciación de canales Dual Audio
     this.channelA = this._createChannel('channelA');
     this.channelB = this._createChannel('channelB');
+    this.audioA = this.channelA.audio;
+    this.audioB = this.channelB.audio;
 
     this.activeChannel = this.channelA;
     this.idleChannel = this.channelB;
+    this.currentActivePlayer = 'A';
   }
 
   private _createChannel(id: string): DualAudioChannel {
@@ -197,4 +208,71 @@ export class DualAudioManager {
     this.activeChannel.isLoaded = true;
     await this.activeChannel.audio.play();
   }
+
+  // Techo de RAM estricto: máximo 2 ObjectURLs en memoria
+  private enforceRamLimits(currentTrackId: string, nextTrackId?: string) {
+    for (const [trackId, url] of this.activeBlobs.entries()) {
+      if (trackId !== currentTrackId && trackId !== nextTrackId) {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {}
+        this.activeBlobs.delete(trackId);
+      }
+    }
+  }
+
+  public async loadTrackStream(track: AudioTrack, token: string, isPreload = false): Promise<string> {
+    if (this.activeBlobs.has(track.id)) {
+      return this.activeBlobs.get(track.id)!;
+    }
+
+    // Comprobación de autenticación obligatoria antes de la llamada REST
+    if (!token) throw new Error('AUTH_REQUIRED_NO_TOKEN');
+
+    const fileId = track.driveFileId || track.cloudFileId;
+    if (!fileId) throw new Error('TRACK_HAS_NO_DRIVE_ID');
+
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    if (res.status === 401) throw new Error('TOKEN_EXPIRED');
+    if (res.status === 403 || res.status === 429) throw new Error('RATE_LIMIT_EXCEEDED');
+    if (!res.ok) throw new Error(`STREAM_FETCH_FAILED_${res.status}`);
+
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    this.activeBlobs.set(track.id, blobUrl);
+
+    if (!isPreload) {
+      this.enforceRamLimits(track.id);
+    }
+
+    return blobUrl;
+  }
+
+  // Pre-priming de códecs para transición gapless
+  public primeSecondaryPlayer(blobUrl: string) {
+    const targetPlayer = this.currentActivePlayer === 'A' ? this.audioB : this.audioA;
+    targetPlayer.src = blobUrl;
+    targetPlayer.load();
+  }
+
+  public purgeAllBuffers() {
+    this.audioA.pause();
+    this.audioB.pause();
+    this.audioA.removeAttribute('src');
+    this.audioB.removeAttribute('src');
+    this.audioA.load();
+    this.audioB.load();
+
+    for (const [, url] of this.activeBlobs.entries()) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {}
+    }
+    this.activeBlobs.clear();
+  }
 }
+
+export const dualAudioManager = new DualAudioManager();

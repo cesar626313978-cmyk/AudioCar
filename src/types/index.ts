@@ -144,6 +144,8 @@ export interface UserPreferences {
   bufferAheadCount: number;
   theme: 'dark' | 'light';
   hideDemoTracks: boolean;
+  selectedFolderId?: string;
+  selectedFolderName?: string;
   ledColor?: string;
   isLedPulseActive?: boolean;
   lastUpdated: number;

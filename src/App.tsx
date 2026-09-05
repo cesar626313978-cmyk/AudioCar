@@ -107,6 +107,8 @@ export function App() {
         syncCloudContent();
       } else if (!authUser) {
         setUser(null);
+        audioEngine.stop();
+        audioEngine.purgeMemoryBuffers();
       }
     });
 

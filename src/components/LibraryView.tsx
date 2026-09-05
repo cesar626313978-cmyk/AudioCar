@@ -105,11 +105,26 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
   const handlePlayAll = () => {
     if (filteredTracks.length > 0) {
+      const firstTrack = filteredTracks[0];
+      if (firstTrack.source === 'drive') {
+        const user = authService.getUser();
+        if (!user || !user.accessToken || (user.expiresAt && Date.now() >= user.expiresAt)) {
+          audioEngine.notifyAuthRequired('drive', firstTrack);
+          return;
+        }
+      }
       audioEngine.setQueue(filteredTracks, 0, true);
     }
   };
 
   const handlePlayTrack = (track: AudioTrack, index: number) => {
+    if (track.source === 'drive') {
+      const user = authService.getUser();
+      if (!user || !user.accessToken || (user.expiresAt && Date.now() >= user.expiresAt)) {
+        audioEngine.notifyAuthRequired('drive', track);
+        return;
+      }
+    }
     audioEngine.setQueue(filteredTracks, index, true);
   };
 

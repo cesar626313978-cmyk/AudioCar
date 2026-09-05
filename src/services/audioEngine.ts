@@ -17,6 +17,7 @@ import { cloudService } from './cloudService';
 import { authService } from './authService';
 import { preferencesService } from './preferencesService';
 import { PlaybackSeekController, AudioSeekEngine } from './playbackSeekController';
+import { dualAudioManager } from './dualAudioManager';
 
 type StateListener = (state: PlayerState) => void;
 type AuthRequiredListener = (provider: 'drive', track?: AudioTrack) => void;
@@ -722,6 +723,18 @@ class AudioEngine implements AudioSeekEngine {
     return null;
   }
 
+  public async playTrack(track: AudioTrack, tokenOverride?: string) {
+    const list = this.state.queue.some((t) => t.id === track.id) ? this.state.queue : [track, ...this.state.queue];
+    const index = list.findIndex((t) => t.id === track.id);
+    if (index !== -1) {
+      if (this.state.queue !== list) {
+        await this.setQueue(list, index, true);
+      } else {
+        await this.transitionToTrackIndex(index);
+      }
+    }
+  }
+
   public async playTrackById(trackId: string, trackList?: AudioTrack[]) {
     const list = trackList || this.state.queue;
     const index = list.findIndex((t) => t.id === trackId);
@@ -734,10 +747,19 @@ class AudioEngine implements AudioSeekEngine {
     }
   }
 
-  private async getTrackStreamUrl(track: AudioTrack): Promise<string> {
+  private async getTrackStreamUrl(track: AudioTrack, tokenOverride?: string): Promise<string> {
     const url = await cloudService.getStreamUrl(track);
     if (url) return url;
     if (track.source === 'drive' && track.driveFileId) {
+      const token = tokenOverride || authService.getAccessToken();
+      if (token) {
+        try {
+          return await dualAudioManager.loadTrackStream(track, token);
+        } catch (e: any) {
+          if (e?.message === 'TOKEN_EXPIRED') throw e;
+          if (e?.message === 'RATE_LIMIT_EXCEEDED') throw e;
+        }
+      }
       return await driveService.getStreamBlobUrl(track.driveFileId, track.mimeType);
     }
     return track.streamUrl || '';
@@ -1156,6 +1178,46 @@ class AudioEngine implements AudioSeekEngine {
     } else {
       this.activeAudio.pause();
     }
+  }
+
+  public stop() {
+    this.pause();
+    this.seek(0);
+    this.state.isPlaying = false;
+    this.state.currentTime = 0;
+    this.notifyListeners();
+  }
+
+  public purgeMemoryBuffers() {
+    // 1. Detener elementos de audio y purgar fuentes nativas HTML5
+    try {
+      this.audioA.pause();
+      this.audioA.removeAttribute('src');
+      this.audioA.load();
+    } catch {}
+
+    try {
+      this.audioB.pause();
+      this.audioB.removeAttribute('src');
+      this.audioB.load();
+    } catch {}
+
+    // 2. Desconectar o purgar el gestor dual
+    try {
+      dualAudioManager.purgeAllBuffers();
+    } catch {}
+
+    // 3. Purgar caché de blobs de Drive
+    try {
+      driveService.evictOldBlobsExcept([]);
+    } catch {}
+
+    // 4. Resetear estado interno
+    this.state.isPlaying = false;
+    this.state.preloadedTrackIds = [];
+    this.state.isPreloading = false;
+    this.state.currentTime = 0;
+    this.notifyListeners();
   }
 
   public togglePlay() {
