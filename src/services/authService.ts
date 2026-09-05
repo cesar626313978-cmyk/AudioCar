@@ -141,17 +141,14 @@ class AuthService {
    */
   public async refreshAccessTokenSilently(): Promise<string | null> {
     if (this.isRefreshingToken) {
-      // If already in progress, wait for completion with a strict safety timeout
+      // If already in progress, wait for completion
       return new Promise((resolve) => {
-        let elapsed = 0;
         const checkInterval = setInterval(() => {
-          elapsed += 200;
-          if (!this.isRefreshingToken || elapsed >= 3000) {
+          if (!this.isRefreshingToken) {
             clearInterval(checkInterval);
-            this.isRefreshingToken = false;
             resolve(this.currentUser?.accessToken || null);
           }
-        }, 200);
+        }, 300);
       });
     }
 
@@ -168,60 +165,43 @@ class AuthService {
 
     try {
       return await new Promise<string | null>((resolve) => {
-        let finished = false;
-        const finish = (token: string | null) => {
-          if (!finished) {
-            finished = true;
+        const clientId = this.getClientId();
+        const silentClient = window.google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: SCOPES.join(' '),
+          prompt: '', // Silent refresh without popup or account picker
+          hint: current.email || undefined,
+          callback: async (tokenResponse: any) => {
             this.isRefreshingToken = false;
-            clearTimeout(timeoutId);
-            resolve(token);
-          }
-        };
+            if (tokenResponse && tokenResponse.access_token) {
+              const expiresInSec = tokenResponse.expires_in || 3600;
+              const expiresAt = Date.now() + expiresInSec * 1000 - 60000;
 
-        const timeoutId = setTimeout(() => {
-          console.warn('[AuthService] Silent token refresh timed out (common in vehicle/restricted browsers). Keeping existing session.');
-          finish(this.currentUser?.accessToken || null);
-        }, 3500);
+              const updatedUser: DriveAuthUser = {
+                ...current,
+                accessToken: tokenResponse.access_token,
+                expiresAt
+              };
 
-        try {
-          const clientId = this.getClientId();
-          const silentClient = window.google.accounts.oauth2.initTokenClient({
-            client_id: clientId,
-            scope: SCOPES.join(' '),
-            prompt: '', // Silent refresh without popup or account picker
-            hint: current.email || undefined,
-            callback: async (tokenResponse: any) => {
-              if (tokenResponse && tokenResponse.access_token) {
-                const expiresInSec = tokenResponse.expires_in || 3600;
-                const expiresAt = Date.now() + expiresInSec * 1000 - 60000;
-
-                const updatedUser: DriveAuthUser = {
-                  ...current,
-                  accessToken: tokenResponse.access_token,
-                  expiresAt
-                };
-
-                this.currentUser = updatedUser;
-                localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updatedUser));
-                this.notifyListeners();
-                console.log('[AuthService] Silent token refresh succeeded. Valid for', Math.round(expiresInSec / 60), 'min.');
-                finish(tokenResponse.access_token);
-              } else {
-                console.warn('[AuthService] Silent refresh received no token:', tokenResponse?.error);
-                finish(this.currentUser?.accessToken || null);
-              }
-            },
-            error_callback: (err: any) => {
-              console.warn('[AuthService] Silent token refresh error (offline or blocked iframe):', err);
-              finish(this.currentUser?.accessToken || null);
+              this.currentUser = updatedUser;
+              localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updatedUser));
+              this.notifyListeners();
+              console.log('[AuthService] Silent token refresh succeeded. Valid for', Math.round(expiresInSec / 60), 'min.');
+              resolve(tokenResponse.access_token);
+            } else {
+              console.warn('[AuthService] Silent refresh received no token:', tokenResponse?.error);
+              resolve(this.currentUser?.accessToken || null);
             }
-          });
+          },
+          error_callback: (err: any) => {
+            this.isRefreshingToken = false;
+            console.warn('[AuthService] Silent token refresh error (offline or consent needed):', err);
+            // Keep existing token so offline/cached audio keeps playing without disconnect screen
+            resolve(this.currentUser?.accessToken || null);
+          }
+        });
 
-          silentClient.requestAccessToken({ prompt: '' });
-        } catch (initErr) {
-          console.warn('[AuthService] Could not trigger silent token request:', initErr);
-          finish(this.currentUser?.accessToken || null);
-        }
+        silentClient.requestAccessToken({ prompt: '' });
       });
     } catch (err) {
       this.isRefreshingToken = false;
@@ -417,30 +397,19 @@ class AuthService {
       console.warn('Firebase signOut error:', e);
     }
 
-    // Do NOT call google.accounts.oauth2.revoke on simple sign-out.
-    // Revoking destroys all user consent and grants on Google servers, which causes
-    // Drive API to lose permissions to existing music files when reconnecting!
+    if (this.currentUser?.accessToken && window.google?.accounts?.oauth2) {
+      try {
+        window.google.accounts.oauth2.revoke(this.currentUser.accessToken, () => {
+          console.log('Access token revoked');
+        });
+      } catch (e) {
+        console.warn('Error revoking token:', e);
+      }
+    }
     this.currentUser = null;
     localStorage.removeItem(AUTH_STORAGE_KEY);
     swService.clearToken();
     this.notifyListeners();
-  }
-
-  /**
-   * Explicitly revokes Google OAuth permissions from Google servers if the user chooses to unlink completely.
-   */
-  public async revokeAccountAccess(): Promise<void> {
-    const token = this.currentUser?.accessToken;
-    await this.signOut();
-    if (token && typeof window !== 'undefined' && window.google?.accounts?.oauth2) {
-      try {
-        window.google.accounts.oauth2.revoke(token, () => {
-          console.log('Google OAuth grant revoked on user request');
-        });
-      } catch (e) {
-        console.warn('Error revoking grant:', e);
-      }
-    }
   }
 
   public getUser(): DriveAuthUser | null {

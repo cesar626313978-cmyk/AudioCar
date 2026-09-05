@@ -148,14 +148,13 @@ export class DriveService {
     const token = authService.getAccessToken();
     if (!token) return null;
 
-    // 1. Check if the user previously linked a folder using Google Picker or previous session in localStorage
+    // Check if the user previously linked a folder using Google Picker
     const selected = this.getSelectedMusicFolder();
-    if (selected?.id) {
+    if (selected) {
       try {
         const verifyRes = await fetchWithDriveBackoff(
           `${DRIVE_API_URL}/files/${selected.id}?fields=id,name,parents,trashed`,
-          { headers: this.getHeaders(token) },
-          { maxRetries: 1, timeoutMs: 3500 }
+          { headers: this.getHeaders(token) }
         );
         if (verifyRes.ok) {
           const fileData = await verifyRes.json();
@@ -177,125 +176,104 @@ export class DriveService {
           }
         }
       } catch (e) {
-        console.warn('Could not verify stored selected folder:', e);
+        console.warn('Could not verify stored selected folder, falling back to query:', e);
       }
     }
 
-    // 2. Check IndexedDB to restore previously known root folder from previous successful syncs
     try {
-      const savedFolders = await dbService.getAllFolders();
-      const previousRoot = savedFolders.find(
-        (f) => f.name.toLowerCase() === 'mimusica' || f.name.toLowerCase() === 'musica'
-      );
-      if (previousRoot?.id) {
-        const vRes = await fetchWithDriveBackoff(
-          `${DRIVE_API_URL}/files/${previousRoot.id}?fields=id,name,parents,trashed`,
-          { headers: this.getHeaders(token) },
-          { maxRetries: 1, timeoutMs: 3500 }
-        );
-        if (vRes.ok) {
-          const fData = await vRes.json();
-          if (!fData.trashed) {
-            const validFolder: DriveFolder = {
-              id: fData.id,
-              name: fData.name || previousRoot.name,
-              parentId: fData.parents?.[0] || 'root',
-              path: `/${fData.name || previousRoot.name}`
-            };
-            this.setSelectedMusicFolder(validFolder);
-            return validFolder;
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('Error checking IndexedDB for prior music folder:', e);
-    }
-
-    // 3. Direct query for folder named "mimusica" or common variations
-    try {
+      // 1. Direct query for folder named "mimusica" or common casing variations
       const queryNameFilters = [
         "name = 'mimusica'",
         "name = 'MiMusica'",
         "name = 'Mi musica'",
+        "name = 'Mi música'",
+        "name = 'música'",
+        "name = 'Música'",
         "name = 'Musica'",
-        "name = 'Music'"
+        "name = 'Music'",
+        "name contains 'mimusica'"
       ].join(' or ');
 
       const q = encodeURIComponent(`mimeType = 'application/vnd.google-apps.folder' and trashed = false and (${queryNameFilters})`);
-      const url = `${DRIVE_API_URL}/files?q=${q}&fields=files(id, name, parents, modifiedTime)&pageSize=20&orderBy=name`;
+      const url = `${DRIVE_API_URL}/files?q=${q}&fields=files(id, name, parents, modifiedTime)&pageSize=100&orderBy=name`;
 
-      const res = await fetchWithDriveBackoff(
-        url,
-        { headers: this.getHeaders(token) },
-        { maxRetries: 1, timeoutMs: 4000 }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        const matchedFolders = data.files || [];
-
-        if (matchedFolders.length > 0) {
-          // Prioritize exact match "mimusica"
-          const exactMatch = matchedFolders.find((f: any) => f.name.toLowerCase() === 'mimusica');
-          const bestFolder = exactMatch || matchedFolders[0];
-
-          const rootFolder: DriveFolder = {
-            id: bestFolder.id,
-            name: bestFolder.name,
-            parentId: bestFolder.parents?.[0] || 'root',
-            path: `/${bestFolder.name}`
-          };
-          this.setSelectedMusicFolder(rootFolder);
-          return rootFolder;
+      const res = await fetchWithDriveBackoff(url, { headers: this.getHeaders(token) });
+      if (!res.ok) {
+        if (res.status === 401) {
+          authService.signOut();
         }
+        return null;
       }
-    } catch (err) {
-      console.warn('Direct query error:', err);
-    }
 
-    // 4. Quick scan of accessible folders to locate case-insensitive 'mimusica'
-    try {
+      const data = await res.json();
+      const matchedFolders = data.files || [];
+
+      if (matchedFolders.length > 0) {
+        // Prioritize exact match "mimusica"
+        const exactMatch = matchedFolders.find((f: any) => f.name.toLowerCase() === 'mimusica');
+        const bestFolder = exactMatch || matchedFolders[0];
+
+        const rootFolder: DriveFolder = {
+          id: bestFolder.id,
+          name: bestFolder.name,
+          parentId: bestFolder.parents?.[0] || 'root',
+          path: `/${bestFolder.name}`
+        };
+        this.cachedMusicRootFolder = rootFolder;
+        this.folderDetailsCache.set(rootFolder.id, {
+          id: rootFolder.id,
+          name: rootFolder.name,
+          parentId: 'root',
+          path: `/${rootFolder.name}`
+        });
+        return rootFolder;
+      }
+
+      // 2. Fallback: Search all folders to find case-insensitive 'mimusica'
+      let pageToken: string | undefined = undefined;
+      const allFolders: any[] = [];
       const allQ = encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and trashed = false");
-      const allUrl = `${DRIVE_API_URL}/files?q=${allQ}&fields=files(id, name, parents)&pageSize=50`;
-      const allRes = await fetchWithDriveBackoff(
-        allUrl,
-        { headers: this.getHeaders(token) },
-        { maxRetries: 1, timeoutMs: 4000 }
-      );
-      if (allRes.ok) {
+
+      do {
+        const pageParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+        const allUrl = `${DRIVE_API_URL}/files?q=${allQ}&fields=nextPageToken,files(id, name, parents)&pageSize=500${pageParam}`;
+        const allRes = await fetchWithDriveBackoff(allUrl, { headers: this.getHeaders(token) });
+        if (!allRes.ok) break;
+
         const allData = await allRes.json();
-        const allFolders = allData.files || [];
-
-        const normalize = (s: string) =>
-          s
-            .toLowerCase()
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .replace(/\s+/g, '');
-
-        const found = allFolders.find(
-          (f: any) =>
-            normalize(f.name) === 'mimusica' ||
-            normalize(f.name).includes('musica') ||
-            normalize(f.name) === 'music'
-        );
-        if (found) {
-          const rootFolder: DriveFolder = {
-            id: found.id,
-            name: found.name,
-            parentId: found.parents?.[0] || 'root',
-            path: `/${found.name}`
-          };
-          this.setSelectedMusicFolder(rootFolder);
-          return rootFolder;
+        pageToken = allData.nextPageToken;
+        if (allData.files) {
+          allFolders.push(...allData.files);
         }
-      }
-    } catch (err) {
-      console.warn('Folder scan error:', err);
-    }
+      } while (pageToken);
 
-    // 6. Only if explicitly requested and definitely not found, create "mimusica"
-    if (createIfNotFound) {
-      try {
+      const normalize = (s: string) =>
+        s
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/\s+/g, '');
+
+      const found = allFolders.find((f: any) => normalize(f.name) === 'mimusica' || normalize(f.name).includes('musica'));
+      if (found) {
+        const rootFolder: DriveFolder = {
+          id: found.id,
+          name: found.name,
+          parentId: found.parents?.[0] || 'root',
+          path: `/${found.name}`
+        };
+        this.cachedMusicRootFolder = rootFolder;
+        this.folderDetailsCache.set(rootFolder.id, {
+          id: rootFolder.id,
+          name: rootFolder.name,
+          parentId: 'root',
+          path: `/${rootFolder.name}`
+        });
+        return rootFolder;
+      }
+
+      // 3. Only if explicitly requested and definitely not found, create "mimusica"
+      if (createIfNotFound) {
         const createRes = await fetchWithDriveBackoff(`${DRIVE_API_URL}/files`, {
           method: 'POST',
           headers: {
@@ -316,12 +294,18 @@ export class DriveService {
             parentId: 'root',
             path: `/${MUSIC_ROOT_FOLDER_NAME}`
           };
-          this.setSelectedMusicFolder(newFolder);
+          this.cachedMusicRootFolder = newFolder;
+          this.folderDetailsCache.set(newFolder.id, {
+            id: newFolder.id,
+            name: newFolder.name,
+            parentId: 'root',
+            path: `/${newFolder.name}`
+          });
           return newFolder;
         }
-      } catch (e) {
-        console.warn('Error creating mimusica folder in Drive:', e);
       }
+    } catch (e) {
+      console.warn('Error locating "mimusica" folder in Drive:', e);
     }
 
     return null;

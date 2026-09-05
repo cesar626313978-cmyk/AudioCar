@@ -26,11 +26,14 @@ class GooglePickerService {
   private pickerLoadingPromise: Promise<void> | null = null;
 
   /**
-   * Retrieves the public Google API Key for Google Picker API only if explicitly configured
+   * Retrieves the public Google API Key for Google Picker API
    */
   private getApiKey(): string {
-    const key = ((import.meta as any).env?.VITE_GOOGLE_API_KEY as string) || '';
-    return key.trim();
+    return (
+      ((import.meta as any).env?.VITE_GOOGLE_API_KEY as string) ||
+      firebaseConfig.apiKey ||
+      ''
+    );
   }
 
   /**
@@ -162,11 +165,7 @@ class GooglePickerService {
             }
           });
 
-        if (typeof window !== 'undefined' && window.location.origin) {
-          builder.setOrigin(window.location.origin);
-        }
-
-        if (apiKey && apiKey.length > 0) {
+        if (apiKey) {
           builder.setDeveloperKey(apiKey);
         }
         if (appId) {
@@ -244,11 +243,7 @@ class GooglePickerService {
             }
           });
 
-        if (typeof window !== 'undefined' && window.location.origin) {
-          builder.setOrigin(window.location.origin);
-        }
-
-        if (apiKey && apiKey.length > 0) {
+        if (apiKey) {
           builder.setDeveloperKey(apiKey);
         }
         if (appId) {

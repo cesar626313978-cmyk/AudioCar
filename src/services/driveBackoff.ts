@@ -8,15 +8,13 @@ export interface BackoffOptions {
   maxRetries?: number;
   baseDelayMs?: number;
   maxDelayMs?: number;
-  timeoutMs?: number;
   retryOn401?: boolean;
   onRetry?: (attempt: number, delayMs: number, reason: string) => void;
 }
 
-const DEFAULT_MAX_RETRIES = 3;
-const DEFAULT_BASE_DELAY_MS = 800;
-const DEFAULT_MAX_DELAY_MS = 8000;
-const DEFAULT_TIMEOUT_MS = 9000;
+const DEFAULT_MAX_RETRIES = 5;
+const DEFAULT_BASE_DELAY_MS = 1000;
+const DEFAULT_MAX_DELAY_MS = 32000;
 
 /**
  * Calculates exponential backoff with full jitter according to Google's standard algorithm:
@@ -104,7 +102,8 @@ export async function isDriveRateLimitOrRetryable(response: Response): Promise<{
         return { retryable: true, reason: `403 Quota Message: ${message}` };
       }
     } catch {
-      return { retryable: false, reason: '403 Forbidden (Non-rate-limit)' };
+      // If parsing fails but status is 403, consider safe retry once
+      return { retryable: true, reason: '403 Unknown Quota Limit' };
     }
   }
 
@@ -122,22 +121,12 @@ export async function fetchWithDriveBackoff(
   const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
   const baseDelayMs = options.baseDelayMs ?? DEFAULT_BASE_DELAY_MS;
   const maxDelayMs = options.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   let lastError: any = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-    const mergedInit: RequestInit = {
-      ...init,
-      signal: init?.signal || controller.signal
-    };
-
     try {
-      const response = await fetch(input, mergedInit);
-      clearTimeout(timeoutId);
+      const response = await fetch(input, init);
 
       if (response.ok || response.status === 206 || response.status === 304) {
         return response;
@@ -152,13 +141,12 @@ export async function fetchWithDriveBackoff(
             const currentHeaders = new Headers(init.headers || {});
             currentHeaders.set('Authorization', `Bearer ${newToken}`);
             init = { ...init, headers: currentHeaders };
-            console.log('[Drive Backoff] HTTP 401 detected: silently refreshed token and retrying request.');
+            console.log('[Drive Backoff] HTTP 401 detected: silently refreshed token and retrying request seamlessly.');
             continue;
           }
         } catch (authErr) {
           console.warn('[Drive Backoff] Token refresh on 401 failed:', authErr);
         }
-        return response;
       }
 
       const { retryable, reason } = await isDriveRateLimitOrRetryable(response);
@@ -178,11 +166,10 @@ export async function fetchWithDriveBackoff(
 
       return response;
     } catch (networkError: any) {
-      clearTimeout(timeoutId);
       lastError = networkError;
       if (attempt < maxRetries) {
         const delayMs = calculateJitterDelay(attempt, baseDelayMs, maxDelayMs);
-        console.warn(`[Drive Backoff] Network/timeout failure (Attempt ${attempt + 1}/${maxRetries}), retrying in ${delayMs}ms:`, networkError.message);
+        console.warn(`[Drive Backoff] Network failure (Attempt ${attempt + 1}/${maxRetries}), retrying in ${delayMs}ms:`, networkError.message);
         if (options.onRetry) {
           options.onRetry(attempt + 1, delayMs, networkError.message || 'Network error');
         }
