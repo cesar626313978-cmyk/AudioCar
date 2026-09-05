@@ -109,7 +109,15 @@ export function App() {
       }
     });
 
-    // 4. Subscribe to Drive Auth Required events (triggered when user tries to play or access Drive content while disconnected)
+    // 4. Subscribe to live preference changes (local updates & cloud sync merges)
+    const unsubscribePrefs = preferencesService.subscribe((prefs) => {
+      audioEngine.applyPreferencesProfile(prefs);
+      if (prefs.theme && (prefs.theme === 'dark' || prefs.theme === 'light')) {
+        setTheme(prefs.theme);
+      }
+    });
+
+    // 5. Subscribe to Drive Auth Required events (triggered when user tries to play or access Drive content while disconnected)
     const unsubscribeAuthRequired = audioEngine.onAuthRequired((provider, track) => {
       setSyncNotice({
         isOpen: true,
@@ -118,16 +126,17 @@ export function App() {
       });
     });
 
-    // 5. Load initial local data & queue
+    // 6. Load initial local data & queue
     loadInitialData();
 
-    // 6. Init Google Token client
+    // 7. Init Google Token client
     authService.initTokenClient();
 
     return () => {
       unsubscribeAudio();
       unsubscribeCloud();
       unsubscribeAuth();
+      unsubscribePrefs();
       unsubscribeAuthRequired();
     };
   }, []);

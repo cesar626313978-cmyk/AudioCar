@@ -6,7 +6,7 @@
  * and AppData playlist synchronization.
  */
 
-import { AudioTrack, DriveFolder, Playlist, ImageFormat } from '../types';
+import { AudioTrack, DriveFolder, Playlist, ImageFormat, UserPreferences } from '../types';
 import { authService } from './authService';
 import { dbService } from './dbService';
 import { fetchWithDriveBackoff } from './driveBackoff';
@@ -942,6 +942,89 @@ export class DriveService {
       console.warn('Error loading playlists from AppData:', e);
     }
     return [];
+  }
+
+  /**
+   * Persists user audio, DSP and player preferences to Google Drive AppData folder
+   * (audiocar_user_preferences.json).
+   * Hidden, private, and roams across all browsers, PCs, and car dashboards.
+   */
+  async savePreferencesToDriveAppData(preferences: UserPreferences): Promise<boolean> {
+    const token = authService.getAccessToken();
+    if (!token) return false;
+
+    try {
+      const fileName = 'audiocar_user_preferences.json';
+      const listQ = encodeURIComponent(`name = '${fileName}' and 'appDataFolder' in parents and trashed = false`);
+      const listUrl = `${DRIVE_API_URL}/files?q=${listQ}&spaces=appDataFolder&fields=files(id)`;
+      const listRes = await fetchWithDriveBackoff(listUrl, { headers: this.getHeaders(token) });
+      const listData = await listRes.json();
+      const existingFile = listData.files?.[0];
+
+      const blob = new Blob([JSON.stringify(preferences, null, 2)], { type: 'application/json' });
+
+      if (existingFile) {
+        const updateUrl = `https://www.googleapis.com/upload/drive/v3/files/${existingFile.id}?uploadType=media`;
+        await fetchWithDriveBackoff(updateUrl, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: blob
+        });
+      } else {
+        const metadata = {
+          name: fileName,
+          parents: ['appDataFolder']
+        };
+
+        const form = new FormData();
+        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+        form.append('file', blob);
+
+        await fetchWithDriveBackoff('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`
+          },
+          body: form
+        });
+      }
+      return true;
+    } catch (e) {
+      console.warn('[DriveService] Error saving preferences to AppData:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Retrieves saved user preferences from Google Drive AppData folder.
+   */
+  async loadPreferencesFromDriveAppData(): Promise<UserPreferences | null> {
+    const token = authService.getAccessToken();
+    if (!token) return null;
+
+    try {
+      const fileName = 'audiocar_user_preferences.json';
+      const listQ = encodeURIComponent(`name = '${fileName}' and 'appDataFolder' in parents and trashed = false`);
+      const listUrl = `${DRIVE_API_URL}/files?q=${listQ}&spaces=appDataFolder&fields=files(id)`;
+      const listRes = await fetchWithDriveBackoff(listUrl, { headers: this.getHeaders(token) });
+      const listData = await listRes.json();
+      const existingFile = listData.files?.[0];
+
+      if (!existingFile) return null;
+
+      const downloadUrl = `${DRIVE_API_URL}/files/${existingFile.id}?alt=media`;
+      const dlRes = await fetchWithDriveBackoff(downloadUrl, { headers: this.getHeaders(token) });
+      if (dlRes.ok) {
+        const data = await dlRes.json();
+        return data as UserPreferences;
+      }
+    } catch (e) {
+      console.warn('[DriveService] Error loading preferences from AppData:', e);
+    }
+    return null;
   }
 }
 

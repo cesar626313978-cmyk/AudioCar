@@ -144,5 +144,7 @@ export interface UserPreferences {
   bufferAheadCount: number;
   theme: 'dark' | 'light';
   hideDemoTracks: boolean;
+  ledColor?: string;
+  isLedPulseActive?: boolean;
   lastUpdated: number;
 }

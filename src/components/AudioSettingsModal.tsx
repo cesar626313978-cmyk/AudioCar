@@ -12,7 +12,7 @@ import React, { useState, useEffect } from 'react';
 import { PlayerState, PlaybackMode, PlaybackScope, AudioTrack, DriveAuthUser } from '../types';
 import { audioEngine } from '../services/audioEngine';
 import { authService } from '../services/authService';
-import { preferencesService } from '../services/preferencesService';
+import { preferencesService, CloudSyncStatus } from '../services/preferencesService';
 import {
   X,
   Sliders,
@@ -38,7 +38,10 @@ import {
   RotateCcw,
   User,
   UserCheck,
-  ExternalLink
+  ExternalLink,
+  Cloud,
+  CloudOff,
+  RefreshCw
 } from 'lucide-react';
 
 interface AudioSettingsModalProps {
@@ -67,13 +70,20 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
   const [clearedCacheMsg, setClearedCacheMsg] = useState(false);
   const [currentUser, setCurrentUser] = useState<DriveAuthUser | null>(authService.getUser());
   const [resetMsg, setResetMsg] = useState(false);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>(preferencesService.getCloudSyncStatus());
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubAuth = authService.subscribe((user) => {
       setCurrentUser(user);
     });
+    const unsubSync = preferencesService.subscribeSyncStatus((status) => {
+      setCloudSyncStatus(status);
+    });
     return () => {
       unsubAuth();
+      unsubSync();
     };
   }, []);
 
@@ -83,6 +93,26 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
     audioEngine.applyPreferencesProfile(defaults);
     setResetMsg(true);
     setTimeout(() => setResetMsg(false), 3000);
+  };
+
+  const handleManualSync = async () => {
+    if (!currentUser?.email) return;
+    setIsManualSyncing(true);
+    try {
+      await preferencesService.syncWithCloud(currentUser.email);
+      setSyncFeedback('¡Sincronizado!');
+      setTimeout(() => setSyncFeedback(null), 2500);
+    } catch {
+      setSyncFeedback('Error al sincronizar');
+      setTimeout(() => setSyncFeedback(null), 2500);
+    } finally {
+      setIsManualSyncing(false);
+    }
+  };
+
+  const handleSaveAndClose = async () => {
+    await preferencesService.flushCloudSync();
+    onClose();
   };
 
   const currentTrack = audioEngine.getCurrentTrack();
@@ -163,20 +193,54 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
                 <span className="text-sm font-bold text-white">
                   {currentUser ? currentUser.email : 'Modo Local / Invitado'}
                 </span>
-                <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  Perfil Personalizado Activo
-                </span>
+                {currentUser && (
+                  <>
+                    {cloudSyncStatus === 'syncing' || isManualSyncing ? (
+                      <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-blue-950/80 text-blue-300 border border-blue-800/80 flex items-center gap-1.5">
+                        <RefreshCw className="w-3 h-3 text-blue-400 animate-spin" />
+                        Sincronizando Nube...
+                      </span>
+                    ) : cloudSyncStatus === 'synced' ? (
+                      <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 flex items-center gap-1.5">
+                        <Cloud className="w-3 h-3 text-emerald-400" />
+                        Nube Drive Sincronizada
+                      </span>
+                    ) : cloudSyncStatus === 'error' ? (
+                      <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-800/80 flex items-center gap-1.5">
+                        <CloudOff className="w-3 h-3 text-amber-400" />
+                        Guardado Local (Pendiente Nube)
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700 flex items-center gap-1.5">
+                        <CloudOff className="w-3 h-3 text-neutral-400" />
+                        Modo Local
+                      </span>
+                    )}
+                  </>
+                )}
               </div>
               <p className="text-xs text-neutral-400 mt-0.5">
                 {currentUser
-                  ? 'Tus modos, EQ, crossfade y búfer se guardan automáticamente para esta cuenta de Gmail.'
-                  : 'Inicia sesión con tu cuenta de Gmail para que tus preferencias se guarden por usuario.'}
+                  ? 'Tus modos, EQ, crossfade, búfer y luces LED se guardan en la nube (Drive AppData) para estar sincronizados en cualquier navegador o en tu coche.'
+                  : 'Inicia sesión con tu cuenta de Google Drive para sincronizar tus preferencias en la nube.'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap">
+            {currentUser && (
+              <button
+                type="button"
+                onClick={handleManualSync}
+                disabled={isManualSyncing}
+                className="hitbox-48 px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-200 hover:text-white border border-neutral-700 text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                title="Sincronizar preferencias con Google Drive AppData ahora"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-neutral-400 ${isManualSyncing ? 'animate-spin' : ''}`} />
+                <span>{syncFeedback || (isManualSyncing ? 'Sincronizando...' : 'Sincronizar')}</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handleResetDefaults}
@@ -859,7 +923,7 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            onClose();
+            handleSaveAndClose();
           }}
           className="hitbox-56 px-8 py-3 rounded-2xl bg-white hover:bg-neutral-200 active:scale-95 text-black font-extrabold text-xs sm:text-sm uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer shadow-lg hover:shadow-white/20"
         >

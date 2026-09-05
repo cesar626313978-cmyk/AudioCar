@@ -10,6 +10,7 @@ import { PlayerState, PlaybackMode } from '../types';
 import { audioEngine } from '../services/audioEngine';
 import { dbService } from '../services/dbService';
 import { authService } from '../services/authService';
+import { preferencesService } from '../services/preferencesService';
 import { AudioVisualizer } from './AudioVisualizer';
 import { AlbumArtwork } from './AlbumArtwork';
 import {
@@ -185,27 +186,45 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubValue, setScrubValue] = useState(0);
 
-  // Ambient LED State (Synced with localStorage)
+  // Ambient LED State (Synced with Preferences & localStorage)
   const [ledColor, setLedColor] = useState<TeslaLedColor>(() => {
+    const prefs = preferencesService.getCurrentPreferences();
+    if (prefs.ledColor && prefs.ledColor in LED_CONFIGS) return prefs.ledColor as TeslaLedColor;
     const saved = localStorage.getItem('audiocar_led_color');
     if (saved && saved in LED_CONFIGS) return saved as TeslaLedColor;
     return 'sport-red';
   });
 
   const [isLedPulseActive, setIsLedPulseActive] = useState<boolean>(() => {
+    const prefs = preferencesService.getCurrentPreferences();
+    if (prefs.isLedPulseActive !== undefined) return prefs.isLedPulseActive;
     const saved = localStorage.getItem('audiocar_led_pulse');
     return saved !== 'false';
   });
 
+  useEffect(() => {
+    const unsub = preferencesService.subscribe((prefs) => {
+      if (prefs.ledColor && prefs.ledColor in LED_CONFIGS) {
+        setLedColor(prefs.ledColor as TeslaLedColor);
+      }
+      if (prefs.isLedPulseActive !== undefined) {
+        setIsLedPulseActive(prefs.isLedPulseActive);
+      }
+    });
+    return unsub;
+  }, []);
+
   const changeLedColor = (col: TeslaLedColor) => {
     setLedColor(col);
     localStorage.setItem('audiocar_led_color', col);
+    preferencesService.updateCurrentPreference('ledColor', col);
   };
 
   const toggleLedPulse = () => {
     setIsLedPulseActive((prev) => {
       const next = !prev;
       localStorage.setItem('audiocar_led_pulse', String(next));
+      preferencesService.updateCurrentPreference('isLedPulseActive', next);
       return next;
     });
   };
