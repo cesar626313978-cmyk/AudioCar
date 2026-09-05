@@ -229,20 +229,20 @@ export function App() {
       );
       const hideDemoTracks = await dbService.isDemoTracksHidden();
 
+      if (syncResult.status === 'root_folder_not_found') {
+        setSyncNotice({
+          isOpen: true,
+          type: 'mimusica_not_found',
+          userEmail: syncResult.userEmail
+        });
+        return;
+      }
+
       if (isManual) {
         if (syncResult.status === 'not_authenticated') {
           setSyncNotice({
             isOpen: true,
             type: 'not_connected'
-          });
-          return;
-        }
-
-        if (syncResult.status === 'root_folder_not_found') {
-          setSyncNotice({
-            isOpen: true,
-            type: 'mimusica_not_found',
-            userEmail: syncResult.userEmail
           });
           return;
         }
@@ -261,22 +261,26 @@ export function App() {
       const cloudTracks = syncResult.tracks || [];
       const cloudFolders = syncResult.folders || [];
 
-      // Merge with demo tracks (unless user removed them)
-      const mergedMap = new Map<string, AudioTrack>();
-      if (!hideDemoTracks) {
-        DEMO_TRACKS.forEach((t) => mergedMap.set(t.id, t));
+      // If we found cloud folders, update state; do not wipe existing cached folders if empty
+      if (cloudFolders.length > 0) {
+        setFolders(cloudFolders);
       }
-      cloudTracks.forEach((t) => mergedMap.set(t.id, t));
 
-      const updatedTracks = Array.from(mergedMap.values());
-      setTracks(updatedTracks);
-      setFolders(cloudFolders);
-      audioEngine.setAllAvailableTracks(updatedTracks);
+      // Merge with demo tracks (unless user removed them)
+      if (cloudTracks.length > 0) {
+        const mergedMap = new Map<string, AudioTrack>();
+        if (!hideDemoTracks) {
+          DEMO_TRACKS.forEach((t) => mergedMap.set(t.id, t));
+        }
+        cloudTracks.forEach((t) => mergedMap.set(t.id, t));
 
-      // Update player queue if it only had demo tracks or is empty
-      const currentTrack = audioEngine.getCurrentTrack();
-      if (!currentTrack || currentTrack.source === 'demo') {
-        if (cloudTracks.length > 0) {
+        const updatedTracks = Array.from(mergedMap.values());
+        setTracks(updatedTracks);
+        audioEngine.setAllAvailableTracks(updatedTracks);
+
+        // Update player queue if it only had demo tracks or is empty
+        const currentTrack = audioEngine.getCurrentTrack();
+        if (!currentTrack || currentTrack.source === 'demo') {
           audioEngine.setQueue(cloudTracks, 0, false);
         }
       }

@@ -141,14 +141,17 @@ class AuthService {
    */
   public async refreshAccessTokenSilently(): Promise<string | null> {
     if (this.isRefreshingToken) {
-      // If already in progress, wait for completion
+      // If already in progress, wait for completion with a strict safety timeout
       return new Promise((resolve) => {
+        let elapsed = 0;
         const checkInterval = setInterval(() => {
-          if (!this.isRefreshingToken) {
+          elapsed += 200;
+          if (!this.isRefreshingToken || elapsed >= 3000) {
             clearInterval(checkInterval);
+            this.isRefreshingToken = false;
             resolve(this.currentUser?.accessToken || null);
           }
-        }, 300);
+        }, 200);
       });
     }
 
@@ -165,43 +168,60 @@ class AuthService {
 
     try {
       return await new Promise<string | null>((resolve) => {
-        const clientId = this.getClientId();
-        const silentClient = window.google.accounts.oauth2.initTokenClient({
-          client_id: clientId,
-          scope: SCOPES.join(' '),
-          prompt: '', // Silent refresh without popup or account picker
-          hint: current.email || undefined,
-          callback: async (tokenResponse: any) => {
+        let finished = false;
+        const finish = (token: string | null) => {
+          if (!finished) {
+            finished = true;
             this.isRefreshingToken = false;
-            if (tokenResponse && tokenResponse.access_token) {
-              const expiresInSec = tokenResponse.expires_in || 3600;
-              const expiresAt = Date.now() + expiresInSec * 1000 - 60000;
-
-              const updatedUser: DriveAuthUser = {
-                ...current,
-                accessToken: tokenResponse.access_token,
-                expiresAt
-              };
-
-              this.currentUser = updatedUser;
-              localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updatedUser));
-              this.notifyListeners();
-              console.log('[AuthService] Silent token refresh succeeded. Valid for', Math.round(expiresInSec / 60), 'min.');
-              resolve(tokenResponse.access_token);
-            } else {
-              console.warn('[AuthService] Silent refresh received no token:', tokenResponse?.error);
-              resolve(this.currentUser?.accessToken || null);
-            }
-          },
-          error_callback: (err: any) => {
-            this.isRefreshingToken = false;
-            console.warn('[AuthService] Silent token refresh error (offline or consent needed):', err);
-            // Keep existing token so offline/cached audio keeps playing without disconnect screen
-            resolve(this.currentUser?.accessToken || null);
+            clearTimeout(timeoutId);
+            resolve(token);
           }
-        });
+        };
 
-        silentClient.requestAccessToken({ prompt: '' });
+        const timeoutId = setTimeout(() => {
+          console.warn('[AuthService] Silent token refresh timed out (common in vehicle/restricted browsers). Keeping existing session.');
+          finish(this.currentUser?.accessToken || null);
+        }, 3500);
+
+        try {
+          const clientId = this.getClientId();
+          const silentClient = window.google.accounts.oauth2.initTokenClient({
+            client_id: clientId,
+            scope: SCOPES.join(' '),
+            prompt: '', // Silent refresh without popup or account picker
+            hint: current.email || undefined,
+            callback: async (tokenResponse: any) => {
+              if (tokenResponse && tokenResponse.access_token) {
+                const expiresInSec = tokenResponse.expires_in || 3600;
+                const expiresAt = Date.now() + expiresInSec * 1000 - 60000;
+
+                const updatedUser: DriveAuthUser = {
+                  ...current,
+                  accessToken: tokenResponse.access_token,
+                  expiresAt
+                };
+
+                this.currentUser = updatedUser;
+                localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updatedUser));
+                this.notifyListeners();
+                console.log('[AuthService] Silent token refresh succeeded. Valid for', Math.round(expiresInSec / 60), 'min.');
+                finish(tokenResponse.access_token);
+              } else {
+                console.warn('[AuthService] Silent refresh received no token:', tokenResponse?.error);
+                finish(this.currentUser?.accessToken || null);
+              }
+            },
+            error_callback: (err: any) => {
+              console.warn('[AuthService] Silent token refresh error (offline or blocked iframe):', err);
+              finish(this.currentUser?.accessToken || null);
+            }
+          });
+
+          silentClient.requestAccessToken({ prompt: '' });
+        } catch (initErr) {
+          console.warn('[AuthService] Could not trigger silent token request:', initErr);
+          finish(this.currentUser?.accessToken || null);
+        }
       });
     } catch (err) {
       this.isRefreshingToken = false;

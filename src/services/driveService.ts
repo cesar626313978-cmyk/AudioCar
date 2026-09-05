@@ -150,11 +150,12 @@ export class DriveService {
 
     // 1. Check if the user previously linked a folder using Google Picker or previous session in localStorage
     const selected = this.getSelectedMusicFolder();
-    if (selected) {
+    if (selected?.id) {
       try {
         const verifyRes = await fetchWithDriveBackoff(
-          `${DRIVE_API_URL}/files/${selected.id}?fields=id,name,parents,trashed&supportsAllDrives=true`,
-          { headers: this.getHeaders(token) }
+          `${DRIVE_API_URL}/files/${selected.id}?fields=id,name,parents,trashed`,
+          { headers: this.getHeaders(token) },
+          { maxRetries: 1, timeoutMs: 3500 }
         );
         if (verifyRes.ok) {
           const fileData = await verifyRes.json();
@@ -176,7 +177,7 @@ export class DriveService {
           }
         }
       } catch (e) {
-        console.warn('Could not verify stored selected folder, checking further tiers:', e);
+        console.warn('Could not verify stored selected folder:', e);
       }
     }
 
@@ -184,12 +185,13 @@ export class DriveService {
     try {
       const savedFolders = await dbService.getAllFolders();
       const previousRoot = savedFolders.find(
-        (f) => f.name.toLowerCase() === 'mimusica' || f.parentId === 'root' || !f.parentId
+        (f) => f.name.toLowerCase() === 'mimusica' || f.name.toLowerCase() === 'musica'
       );
       if (previousRoot?.id) {
         const vRes = await fetchWithDriveBackoff(
-          `${DRIVE_API_URL}/files/${previousRoot.id}?fields=id,name,parents,trashed&supportsAllDrives=true`,
-          { headers: this.getHeaders(token) }
+          `${DRIVE_API_URL}/files/${previousRoot.id}?fields=id,name,parents,trashed`,
+          { headers: this.getHeaders(token) },
+          { maxRetries: 1, timeoutMs: 3500 }
         );
         if (vRes.ok) {
           const fData = await vRes.json();
@@ -209,7 +211,7 @@ export class DriveService {
       console.warn('Error checking IndexedDB for prior music folder:', e);
     }
 
-    // 3. Direct query for folder named "mimusica" or common variations (safe ascii syntax + shared drive support)
+    // 3. Direct query for folder named "mimusica" or common variations
     try {
       const queryNameFilters = [
         "name = 'mimusica'",
@@ -220,9 +222,13 @@ export class DriveService {
       ].join(' or ');
 
       const q = encodeURIComponent(`mimeType = 'application/vnd.google-apps.folder' and trashed = false and (${queryNameFilters})`);
-      const url = `${DRIVE_API_URL}/files?q=${q}&fields=files(id, name, parents, modifiedTime)&pageSize=100&orderBy=name&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+      const url = `${DRIVE_API_URL}/files?q=${q}&fields=files(id, name, parents, modifiedTime)&pageSize=20&orderBy=name`;
 
-      const res = await fetchWithDriveBackoff(url, { headers: this.getHeaders(token) });
+      const res = await fetchWithDriveBackoff(
+        url,
+        { headers: this.getHeaders(token) },
+        { maxRetries: 1, timeoutMs: 4000 }
+      );
       if (res.ok) {
         const data = await res.json();
         const matchedFolders = data.files || [];
@@ -241,80 +247,50 @@ export class DriveService {
           this.setSelectedMusicFolder(rootFolder);
           return rootFolder;
         }
-      } else {
-        console.warn('Direct query returned status:', res.status);
       }
     } catch (err) {
-      console.warn('Direct query error, falling back to full discovery:', err);
+      console.warn('Direct query error:', err);
     }
 
-    // 4. Fallback: Search all accessible folders to find case-insensitive 'mimusica'
+    // 4. Quick scan of accessible folders to locate case-insensitive 'mimusica'
     try {
-      let pageToken: string | undefined = undefined;
-      const allFolders: any[] = [];
       const allQ = encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and trashed = false");
-
-      let pagesCount = 0;
-      do {
-        const pageParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
-        const allUrl = `${DRIVE_API_URL}/files?q=${allQ}&fields=nextPageToken,files(id, name, parents)&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true${pageParam}`;
-        const allRes = await fetchWithDriveBackoff(allUrl, { headers: this.getHeaders(token) });
-        if (!allRes.ok) break;
-
+      const allUrl = `${DRIVE_API_URL}/files?q=${allQ}&fields=files(id, name, parents)&pageSize=50`;
+      const allRes = await fetchWithDriveBackoff(
+        allUrl,
+        { headers: this.getHeaders(token) },
+        { maxRetries: 1, timeoutMs: 4000 }
+      );
+      if (allRes.ok) {
         const allData = await allRes.json();
-        pageToken = allData.nextPageToken;
-        if (allData.files) {
-          allFolders.push(...allData.files);
-        }
-        pagesCount++;
-      } while (pageToken && pagesCount < 5);
+        const allFolders = allData.files || [];
 
-      const normalize = (s: string) =>
-        s
-          .toLowerCase()
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .replace(/\s+/g, '');
-
-      const found = allFolders.find((f: any) => normalize(f.name) === 'mimusica' || normalize(f.name).includes('musica') || normalize(f.name) === 'music');
-      if (found) {
-        const rootFolder: DriveFolder = {
-          id: found.id,
-          name: found.name,
-          parentId: found.parents?.[0] || 'root',
-          path: `/${found.name}`
-        };
-        this.setSelectedMusicFolder(rootFolder);
-        return rootFolder;
-      }
-    } catch (err) {
-      console.warn('Fallback folder scan error:', err);
-    }
-
-    // 5. Fallback: Check shared with me items
-    try {
-      const sharedQ = encodeURIComponent("sharedWithMe = true and mimeType = 'application/vnd.google-apps.folder' and trashed = false");
-      const sharedUrl = `${DRIVE_API_URL}/files?q=${sharedQ}&fields=files(id, name, parents)&pageSize=50&supportsAllDrives=true&includeItemsFromAllDrives=true`;
-      const sharedRes = await fetchWithDriveBackoff(sharedUrl, { headers: this.getHeaders(token) });
-      if (sharedRes.ok) {
-        const sharedData = await sharedRes.json();
-        const sharedFolders = sharedData.files || [];
         const normalize = (s: string) =>
-          s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '');
-        const foundShared = sharedFolders.find((f: any) => normalize(f.name) === 'mimusica' || normalize(f.name).includes('musica'));
-        if (foundShared) {
+          s
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/\s+/g, '');
+
+        const found = allFolders.find(
+          (f: any) =>
+            normalize(f.name) === 'mimusica' ||
+            normalize(f.name).includes('musica') ||
+            normalize(f.name) === 'music'
+        );
+        if (found) {
           const rootFolder: DriveFolder = {
-            id: foundShared.id,
-            name: foundShared.name,
-            parentId: foundShared.parents?.[0] || 'root',
-            path: `/${foundShared.name}`
+            id: found.id,
+            name: found.name,
+            parentId: found.parents?.[0] || 'root',
+            path: `/${found.name}`
           };
           this.setSelectedMusicFolder(rootFolder);
           return rootFolder;
         }
       }
     } catch (err) {
-      console.warn('Shared with me check error:', err);
+      console.warn('Folder scan error:', err);
     }
 
     // 6. Only if explicitly requested and definitely not found, create "mimusica"
