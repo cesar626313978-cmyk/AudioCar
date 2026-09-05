@@ -5,7 +5,7 @@
  */
 
 import React, { useState } from 'react';
-import { Cloud, FolderPlus, AlertTriangle, CheckCircle2, X, RefreshCw, LogIn } from 'lucide-react';
+import { Cloud, FolderPlus, FolderOpen, AlertTriangle, CheckCircle2, X, RefreshCw, LogIn } from 'lucide-react';
 import { authService } from '../services/authService';
 import { driveService } from '../services/driveService';
 
@@ -45,6 +45,42 @@ export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
     } catch (err: any) {
       console.error('Google connect error:', err);
       setErrorMessage(err?.message || 'No se pudo conectar con Google Drive. Intenta de nuevo.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handlePickFolder = async () => {
+    setIsProcessing(true);
+    setErrorMessage(null);
+    try {
+      const folder = await driveService.promptPickMusicFolder();
+      if (folder) {
+        onFolderCreated();
+        onClose();
+      }
+    } catch (err: any) {
+      console.error('Picker error:', err);
+      setErrorMessage(err?.message || 'No se pudo abrir el selector de Google Drive.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleRetrySearch = async () => {
+    setIsProcessing(true);
+    setErrorMessage(null);
+    try {
+      driveService.clearRootCache();
+      const folder = await driveService.getMusicRootFolder(false);
+      if (folder) {
+        onFolderCreated();
+        onClose();
+      } else {
+        setErrorMessage('No se encontró automáticamente "/mimusica". Usa "Seleccionar mi carpeta" para elegirla directamente.');
+      }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Error al buscar la carpeta en Drive.');
     } finally {
       setIsProcessing(false);
     }
@@ -172,10 +208,10 @@ export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
 
             <div className="bg-[#141414] border border-neutral-800/80 rounded-2xl p-4 space-y-2 text-sm text-neutral-300">
               <p>
-                No se ha encontrado la carpeta principal <span className="text-amber-400 font-bold font-mono">/mimusica</span> en tu unidad de Google Drive.
+                No se ha detectado automáticamente la carpeta principal <span className="text-amber-400 font-bold font-mono">/mimusica</span> en tu Google Drive.
               </p>
               <p className="text-xs text-neutral-400">
-                AudioCar requiere esta carpeta para organizar tus álbumes, subcarpetas y carátulas de audio. ¿Deseas que AudioCar la cree automáticamente por ti?
+                Si tu carpeta ya existe en tu Drive, selecciónala directamente con el explorador oficial de Google, o reintenta el escaneo automático.
               </p>
             </div>
 
@@ -186,32 +222,52 @@ export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
               </div>
             )}
 
-            <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+            <div className="space-y-2.5 pt-1">
+              {/* Primary: Select folder via Google Picker */}
               <button
-                onClick={handleCreateMusicFolder}
+                onClick={handlePickFolder}
                 disabled={isProcessing}
-                className="w-full sm:flex-1 hitbox-48 h-12 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-extrabold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg disabled:opacity-50"
+                className="w-full hitbox-48 h-12 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-extrabold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg disabled:opacity-50"
               >
                 {isProcessing ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin text-black" />
-                    <span>Creando carpeta en Drive...</span>
-                  </>
+                  <RefreshCw className="w-4 h-4 animate-spin text-black" />
                 ) : (
-                  <>
-                    <FolderPlus className="w-4 h-4 text-black" />
-                    <span>Crear "/mimusica" ahora</span>
-                  </>
+                  <FolderOpen className="w-4 h-4 text-black" />
                 )}
+                <span>Seleccionar mi carpeta en Google Drive</span>
               </button>
 
-              <button
-                onClick={onClose}
-                disabled={isProcessing}
-                className="w-full sm:w-auto hitbox-48 h-12 px-6 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-700 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer"
-              >
-                Cerrar
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {/* Secondary: Retry auto-search */}
+                <button
+                  onClick={handleRetrySearch}
+                  disabled={isProcessing}
+                  className="hitbox-48 h-11 px-4 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white border border-neutral-700 text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isProcessing ? 'animate-spin' : ''}`} />
+                  <span>Reintentar búsqueda</span>
+                </button>
+
+                {/* Tertiary: Create mimusica folder */}
+                <button
+                  onClick={handleCreateMusicFolder}
+                  disabled={isProcessing}
+                  className="hitbox-48 h-11 px-4 rounded-xl bg-neutral-800/80 hover:bg-neutral-700/90 text-neutral-300 hover:text-white border border-neutral-700/80 text-xs font-bold uppercase tracking-wider transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <FolderPlus className="w-3.5 h-3.5" />
+                  <span>Crear nueva "/mimusica"</span>
+                </button>
+              </div>
+
+              <div className="pt-2 flex justify-end">
+                <button
+                  onClick={onClose}
+                  disabled={isProcessing}
+                  className="w-full sm:w-auto hitbox-48 h-10 px-6 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800 text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer"
+                >
+                  Cerrar
+                </button>
+              </div>
             </div>
           </>
         )}

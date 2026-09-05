@@ -48,8 +48,12 @@ export class GoogleDriveProvider implements CloudMusicProvider {
     driveService.clearRootCache();
   }
 
-  public async listTracks(_folderPath?: string, onProgress?: (progress: { percent: number; step: string }) => void): Promise<AudioTrack[]> {
-    return await driveService.listAudioFiles(undefined, undefined, onProgress);
+  public async listTracks(
+    _folderPath?: string,
+    onProgress?: (progress: { percent: number; step: string }) => void,
+    onPartialTracks?: (tracks: AudioTrack[]) => void
+  ): Promise<AudioTrack[]> {
+    return await driveService.listAudioFiles(undefined, undefined, onProgress, onPartialTracks);
   }
 
   public async listFolders(parentId?: string): Promise<DriveFolder[]> {

@@ -148,12 +148,12 @@ export class DriveService {
     const token = authService.getAccessToken();
     if (!token) return null;
 
-    // Check if the user previously linked a folder using Google Picker
+    // 1. Check if the user previously linked a folder using Google Picker or previous session in localStorage
     const selected = this.getSelectedMusicFolder();
     if (selected) {
       try {
         const verifyRes = await fetchWithDriveBackoff(
-          `${DRIVE_API_URL}/files/${selected.id}?fields=id,name,parents,trashed`,
+          `${DRIVE_API_URL}/files/${selected.id}?fields=id,name,parents,trashed&supportsAllDrives=true`,
           { headers: this.getHeaders(token) }
         );
         if (verifyRes.ok) {
@@ -176,67 +176,88 @@ export class DriveService {
           }
         }
       } catch (e) {
-        console.warn('Could not verify stored selected folder, falling back to query:', e);
+        console.warn('Could not verify stored selected folder, checking further tiers:', e);
       }
     }
 
+    // 2. Check IndexedDB to restore previously known root folder from previous successful syncs
     try {
-      // 1. Direct query for folder named "mimusica" or common casing variations
+      const savedFolders = await dbService.getAllFolders();
+      const previousRoot = savedFolders.find(
+        (f) => f.name.toLowerCase() === 'mimusica' || f.parentId === 'root' || !f.parentId
+      );
+      if (previousRoot?.id) {
+        const vRes = await fetchWithDriveBackoff(
+          `${DRIVE_API_URL}/files/${previousRoot.id}?fields=id,name,parents,trashed&supportsAllDrives=true`,
+          { headers: this.getHeaders(token) }
+        );
+        if (vRes.ok) {
+          const fData = await vRes.json();
+          if (!fData.trashed) {
+            const validFolder: DriveFolder = {
+              id: fData.id,
+              name: fData.name || previousRoot.name,
+              parentId: fData.parents?.[0] || 'root',
+              path: `/${fData.name || previousRoot.name}`
+            };
+            this.setSelectedMusicFolder(validFolder);
+            return validFolder;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error checking IndexedDB for prior music folder:', e);
+    }
+
+    // 3. Direct query for folder named "mimusica" or common variations (safe ascii syntax + shared drive support)
+    try {
       const queryNameFilters = [
         "name = 'mimusica'",
         "name = 'MiMusica'",
         "name = 'Mi musica'",
-        "name = 'Mi música'",
-        "name = 'música'",
-        "name = 'Música'",
         "name = 'Musica'",
-        "name = 'Music'",
-        "name contains 'mimusica'"
+        "name = 'Music'"
       ].join(' or ');
 
       const q = encodeURIComponent(`mimeType = 'application/vnd.google-apps.folder' and trashed = false and (${queryNameFilters})`);
-      const url = `${DRIVE_API_URL}/files?q=${q}&fields=files(id, name, parents, modifiedTime)&pageSize=100&orderBy=name`;
+      const url = `${DRIVE_API_URL}/files?q=${q}&fields=files(id, name, parents, modifiedTime)&pageSize=100&orderBy=name&supportsAllDrives=true&includeItemsFromAllDrives=true`;
 
       const res = await fetchWithDriveBackoff(url, { headers: this.getHeaders(token) });
-      if (!res.ok) {
-        if (res.status === 401) {
-          authService.signOut();
+      if (res.ok) {
+        const data = await res.json();
+        const matchedFolders = data.files || [];
+
+        if (matchedFolders.length > 0) {
+          // Prioritize exact match "mimusica"
+          const exactMatch = matchedFolders.find((f: any) => f.name.toLowerCase() === 'mimusica');
+          const bestFolder = exactMatch || matchedFolders[0];
+
+          const rootFolder: DriveFolder = {
+            id: bestFolder.id,
+            name: bestFolder.name,
+            parentId: bestFolder.parents?.[0] || 'root',
+            path: `/${bestFolder.name}`
+          };
+          this.setSelectedMusicFolder(rootFolder);
+          return rootFolder;
         }
-        return null;
+      } else {
+        console.warn('Direct query returned status:', res.status);
       }
+    } catch (err) {
+      console.warn('Direct query error, falling back to full discovery:', err);
+    }
 
-      const data = await res.json();
-      const matchedFolders = data.files || [];
-
-      if (matchedFolders.length > 0) {
-        // Prioritize exact match "mimusica"
-        const exactMatch = matchedFolders.find((f: any) => f.name.toLowerCase() === 'mimusica');
-        const bestFolder = exactMatch || matchedFolders[0];
-
-        const rootFolder: DriveFolder = {
-          id: bestFolder.id,
-          name: bestFolder.name,
-          parentId: bestFolder.parents?.[0] || 'root',
-          path: `/${bestFolder.name}`
-        };
-        this.cachedMusicRootFolder = rootFolder;
-        this.folderDetailsCache.set(rootFolder.id, {
-          id: rootFolder.id,
-          name: rootFolder.name,
-          parentId: 'root',
-          path: `/${rootFolder.name}`
-        });
-        return rootFolder;
-      }
-
-      // 2. Fallback: Search all folders to find case-insensitive 'mimusica'
+    // 4. Fallback: Search all accessible folders to find case-insensitive 'mimusica'
+    try {
       let pageToken: string | undefined = undefined;
       const allFolders: any[] = [];
       const allQ = encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and trashed = false");
 
+      let pagesCount = 0;
       do {
         const pageParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
-        const allUrl = `${DRIVE_API_URL}/files?q=${allQ}&fields=nextPageToken,files(id, name, parents)&pageSize=500${pageParam}`;
+        const allUrl = `${DRIVE_API_URL}/files?q=${allQ}&fields=nextPageToken,files(id, name, parents)&pageSize=200&supportsAllDrives=true&includeItemsFromAllDrives=true${pageParam}`;
         const allRes = await fetchWithDriveBackoff(allUrl, { headers: this.getHeaders(token) });
         if (!allRes.ok) break;
 
@@ -245,7 +266,8 @@ export class DriveService {
         if (allData.files) {
           allFolders.push(...allData.files);
         }
-      } while (pageToken);
+        pagesCount++;
+      } while (pageToken && pagesCount < 5);
 
       const normalize = (s: string) =>
         s
@@ -254,7 +276,7 @@ export class DriveService {
           .replace(/[\u0300-\u036f]/g, '')
           .replace(/\s+/g, '');
 
-      const found = allFolders.find((f: any) => normalize(f.name) === 'mimusica' || normalize(f.name).includes('musica'));
+      const found = allFolders.find((f: any) => normalize(f.name) === 'mimusica' || normalize(f.name).includes('musica') || normalize(f.name) === 'music');
       if (found) {
         const rootFolder: DriveFolder = {
           id: found.id,
@@ -262,18 +284,42 @@ export class DriveService {
           parentId: found.parents?.[0] || 'root',
           path: `/${found.name}`
         };
-        this.cachedMusicRootFolder = rootFolder;
-        this.folderDetailsCache.set(rootFolder.id, {
-          id: rootFolder.id,
-          name: rootFolder.name,
-          parentId: 'root',
-          path: `/${rootFolder.name}`
-        });
+        this.setSelectedMusicFolder(rootFolder);
         return rootFolder;
       }
+    } catch (err) {
+      console.warn('Fallback folder scan error:', err);
+    }
 
-      // 3. Only if explicitly requested and definitely not found, create "mimusica"
-      if (createIfNotFound) {
+    // 5. Fallback: Check shared with me items
+    try {
+      const sharedQ = encodeURIComponent("sharedWithMe = true and mimeType = 'application/vnd.google-apps.folder' and trashed = false");
+      const sharedUrl = `${DRIVE_API_URL}/files?q=${sharedQ}&fields=files(id, name, parents)&pageSize=50&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+      const sharedRes = await fetchWithDriveBackoff(sharedUrl, { headers: this.getHeaders(token) });
+      if (sharedRes.ok) {
+        const sharedData = await sharedRes.json();
+        const sharedFolders = sharedData.files || [];
+        const normalize = (s: string) =>
+          s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '');
+        const foundShared = sharedFolders.find((f: any) => normalize(f.name) === 'mimusica' || normalize(f.name).includes('musica'));
+        if (foundShared) {
+          const rootFolder: DriveFolder = {
+            id: foundShared.id,
+            name: foundShared.name,
+            parentId: foundShared.parents?.[0] || 'root',
+            path: `/${foundShared.name}`
+          };
+          this.setSelectedMusicFolder(rootFolder);
+          return rootFolder;
+        }
+      }
+    } catch (err) {
+      console.warn('Shared with me check error:', err);
+    }
+
+    // 6. Only if explicitly requested and definitely not found, create "mimusica"
+    if (createIfNotFound) {
+      try {
         const createRes = await fetchWithDriveBackoff(`${DRIVE_API_URL}/files`, {
           method: 'POST',
           headers: {
@@ -294,18 +340,12 @@ export class DriveService {
             parentId: 'root',
             path: `/${MUSIC_ROOT_FOLDER_NAME}`
           };
-          this.cachedMusicRootFolder = newFolder;
-          this.folderDetailsCache.set(newFolder.id, {
-            id: newFolder.id,
-            name: newFolder.name,
-            parentId: 'root',
-            path: `/${newFolder.name}`
-          });
+          this.setSelectedMusicFolder(newFolder);
           return newFolder;
         }
+      } catch (e) {
+        console.warn('Error creating mimusica folder in Drive:', e);
       }
-    } catch (e) {
-      console.warn('Error locating "mimusica" folder in Drive:', e);
     }
 
     return null;
@@ -376,12 +416,14 @@ export class DriveService {
 
   /**
    * Search and list all audio files ONLY inside "mimusica" and its subdirectories.
-   * Iterates through all pages using `nextPageToken` to guarantee 100% of songs are returned.
+   * Optimizes artwork discovery by extracting companion images directly from allFiles,
+   * parallelizing remaining queries, and streaming tracks progressively so playback can start immediately.
    */
   async listAudioFiles(
     folderId?: string,
     searchFilter?: string,
-    onProgress?: (progress: { percent: number; step: string }) => void
+    onProgress?: (progress: { percent: number; step: string }) => void,
+    onPartialTracks?: (tracks: AudioTrack[]) => void
   ): Promise<AudioTrack[]> {
     const token = authService.getAccessToken();
     if (!token) throw new Error('Usuario no autenticado en Google Drive');
@@ -400,7 +442,6 @@ export class DriveService {
 
     if (folderId && folderId !== 'root' && folderId !== 'root_all') {
       targetFolderIds = [folderId];
-      await this.discoverFolderArtwork(folderId).catch(() => {});
     } else {
       targetFolderIds = Array.from(hierarchy.keys());
     }
@@ -416,7 +457,7 @@ export class DriveService {
       const batchIds = targetFolderIds.slice(i, i + chunkSize);
       const parentFilter = batchIds.map((id) => `'${id}' in parents`).join(' or ');
 
-      const batchProgressPercent = Math.min(80, Math.round(50 + ((i + 1) / targetFolderIds.length) * 30));
+      const batchProgressPercent = Math.min(75, Math.round(50 + ((i + 1) / targetFolderIds.length) * 25));
       onProgress?.({
         percent: batchProgressPercent,
         step: `Leyendo archivos de audio (${allFiles.length} canciones encontradas)...`
@@ -467,36 +508,62 @@ export class DriveService {
       }
     }
 
-    // Filter down to valid audio files (excluding covers/images, documents, and non-audio formats)
-    const validAudioFiles = allFiles.filter((file: any) => {
+    // 1. Separate audio files and companion image files directly from allFiles
+    const imageFilesByFolder = new Map<string, any[]>();
+    const validAudioFiles: any[] = [];
+
+    for (const file of allFiles) {
       const name = (file.name || '').toLowerCase();
       const ext = name.split('.').pop() || '';
       const mime = (file.mimeType || '').toLowerCase();
 
-      // Explicitly reject non-audio documents or images
-      if (NON_AUDIO_EXTENSIONS.has(ext)) return false;
-      if (mime.startsWith('image/') || mime.startsWith('text/') || mime.includes('pdf')) return false;
+      // Collect companion image files
+      if (mime.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
+        const pId = file.parents?.[0];
+        if (pId) {
+          if (!imageFilesByFolder.has(pId)) imageFilesByFolder.set(pId, []);
+          imageFilesByFolder.get(pId)!.push(file);
+        }
+        continue;
+      }
 
-      // Accept if audio extension or audio mimeType
-      if (AUDIO_EXTENSIONS.has(ext)) return true;
-      if (mime.startsWith('audio/') || mime === 'application/ogg' || mime.includes('flac') || mime.includes('wav')) return true;
+      // Explicitly reject non-audio documents or text
+      if (NON_AUDIO_EXTENSIONS.has(ext)) continue;
+      if (mime.startsWith('text/') || mime.includes('pdf')) continue;
 
-      // Generic binary fallback: if it doesn't look like image or document, include
-      return true;
-    });
-
-    // Resolve artwork for parents of the found tracks
-    const uniqueParentIds = Array.from(new Set(validAudioFiles.map((f: any) => f.parents?.[0]).filter(Boolean))) as string[];
-    if (uniqueParentIds.length > 0) {
-      onProgress?.({ percent: 85, step: 'Recuperando carátulas e información de álbumes...' });
-    }
-    for (const parentId of uniqueParentIds) {
-      if (!this.folderArtworkCache.has(parentId)) {
-        await this.discoverFolderArtwork(parentId).catch(() => {});
+      // Audio file formats
+      if (AUDIO_EXTENSIONS.has(ext) || mime.startsWith('audio/') || mime === 'application/ogg' || mime.includes('flac') || mime.includes('wav')) {
+        validAudioFiles.push(file);
+      } else {
+        validAudioFiles.push(file);
       }
     }
 
-    const tracks: AudioTrack[] = validAudioFiles.map((file: any) => {
+    // 2. Pre-populate folder artwork cache from the companion images found (0ms, zero extra API calls)
+    for (const [folderIdKey, imgList] of imageFilesByFolder.entries()) {
+      if (!this.folderArtworkCache.has(folderIdKey)) {
+        const selectedImage = imgList.find((img: any) =>
+          /cover|album|folder|front|artwork|caratula|portada|disco/i.test(img.name)
+        ) || imgList[0];
+
+        if (selectedImage) {
+          let format: ImageFormat = 'JPG';
+          const imgName = (selectedImage.name || '').toLowerCase();
+          if (imgName.endsWith('.gif') || selectedImage.mimeType === 'image/gif') format = 'GIF';
+          else if (imgName.endsWith('.png') || selectedImage.mimeType === 'image/png') format = 'PNG';
+          else if (imgName.endsWith('.webp') || selectedImage.mimeType === 'image/webp') format = 'WEBP';
+
+          const thumbUrl = selectedImage.thumbnailLink
+            ? selectedImage.thumbnailLink.replace(/=s\d+/, '=s600')
+            : `https://drive.google.com/thumbnail?id=${selectedImage.id}&sz=w600`;
+
+          this.folderArtworkCache.set(folderIdKey, { url: thumbUrl, format });
+        }
+      }
+    }
+
+    // Helper to map raw file to AudioTrack
+    const mapFileToTrack = (file: any): AudioTrack => {
       const parentFolderId = file.parents?.[0] || musicRoot.id;
       const folderInfo = hierarchy.get(parentFolderId) || this.folderDetailsCache.get(parentFolderId);
       const folderName = folderInfo ? folderInfo.name : 'mimusica';
@@ -515,9 +582,7 @@ export class DriveService {
         detectedFormat = 'JPG';
       }
 
-      // If in a subfolder like "HAPPY_MUSIC", album is "HAPPY_MUSIC"
       const albumName = folderName !== 'mimusica' ? folderName : (parsed.album || 'mimusica');
-
       const safeMimeType = sanitizeAudioMimeType(file.mimeType, file.name);
       const durationMillis = file.videoMediaMetadata?.durationMillis ? parseInt(file.videoMediaMetadata.durationMillis, 10) : 0;
       const parsedDurationSec = durationMillis > 0 ? Math.round(durationMillis / 1000) : 0;
@@ -539,16 +604,58 @@ export class DriveService {
         source: 'drive',
         addedAt: new Date(file.modifiedTime).getTime() || Date.now()
       };
-    });
+    };
 
-    onProgress?.({ percent: 95, step: 'Indexando biblioteca en almacenamiento local...' });
-    // Save to IndexedDB cache
-    if (tracks.length > 0) {
-      await dbService.saveTracks(tracks).catch(() => {});
+    // 3. Generate initial tracks and stream to player immediately!
+    const initialTracks = validAudioFiles.map(mapFileToTrack);
+
+    if (initialTracks.length > 0) {
+      onProgress?.({
+        percent: 80,
+        step: `${initialTracks.length} canciones encontradas. ¡Ya puedes escuchar música!`
+      });
+
+      // Stream tracks immediately to unlock the app and let user play songs right now
+      onPartialTracks?.(initialTracks);
+      dbService.saveTracks(initialTracks).catch(() => {});
     }
 
-    onProgress?.({ percent: 100, step: `¡Sincronización completada! ${tracks.length} canciones encontradas.` });
-    return tracks;
+    // 4. Check for any parent folders that still lack artwork and discover them in parallel batches
+    const uniqueParentIds = Array.from(new Set(validAudioFiles.map((f: any) => f.parents?.[0]).filter(Boolean))) as string[];
+    const missingParentIds = uniqueParentIds.filter((pId) => !this.folderArtworkCache.has(pId));
+
+    if (missingParentIds.length > 0) {
+      let completed = 0;
+      const total = missingParentIds.length;
+      const batchLimit = 5;
+
+      for (let i = 0; i < missingParentIds.length; i += batchLimit) {
+        const batch = missingParentIds.slice(i, i + batchLimit);
+        await Promise.allSettled(
+          batch.map(async (pId) => {
+            await this.discoverFolderArtwork(pId).catch(() => {});
+            completed++;
+            const pct = Math.min(96, 82 + Math.round((completed / total) * 14));
+            onProgress?.({
+              percent: pct,
+              step: `Verificando carátulas (${completed}/${total})...`
+            });
+          })
+        );
+      }
+    }
+
+    // 5. Final map with all discovered artwork attached
+    const finalTracks = validAudioFiles.map(mapFileToTrack);
+
+    onProgress?.({ percent: 97, step: 'Indexando biblioteca en almacenamiento local...' });
+    if (finalTracks.length > 0) {
+      await dbService.saveTracks(finalTracks).catch(() => {});
+      onPartialTracks?.(finalTracks);
+    }
+
+    onProgress?.({ percent: 100, step: `¡Sincronización completada! ${finalTracks.length} canciones listas.` });
+    return finalTracks;
   }
 
   /**
@@ -587,28 +694,19 @@ export class DriveService {
         else if (name.endsWith('.png') || selectedImage.mimeType === 'image/png') format = 'PNG';
         else if (name.endsWith('.webp') || selectedImage.mimeType === 'image/webp') format = 'WEBP';
 
-        // Try downloading image as authenticated Blob for 100% reliable rendering without 403 errors
-        try {
-          const blobRes = await fetchWithDriveBackoff(`${DRIVE_API_URL}/files/${selectedImage.id}?alt=media`, {
-            headers: this.getHeaders(token)
-          });
-          if (blobRes.ok) {
-            const blob = await blobRes.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            const artworkData = { url: blobUrl, format };
-            this.folderArtworkCache.set(folderId, artworkData);
-            return artworkData;
-          }
-        } catch {
-          // If blob fetch fails, fallback to direct links
-        }
-
-        const imgUrl = selectedImage.thumbnailLink || selectedImage.webContentLink || '';
-        if (imgUrl) {
-          const artworkData = { url: imgUrl, format };
+        // Fast high-resolution Google CDN thumbnail link (loads in milliseconds, zero bandwidth on app server)
+        if (selectedImage.thumbnailLink) {
+          const cdnUrl = selectedImage.thumbnailLink.replace(/=s\d+/, '=s600');
+          const artworkData = { url: cdnUrl, format };
           this.folderArtworkCache.set(folderId, artworkData);
           return artworkData;
         }
+
+        // Direct web thumbnail URL fallback
+        const webThumb = `https://drive.google.com/thumbnail?id=${selectedImage.id}&sz=w600`;
+        const artworkData = { url: webThumb, format };
+        this.folderArtworkCache.set(folderId, artworkData);
+        return artworkData;
       }
     } catch (e) {
       console.warn('Could not discover folder artwork:', e);

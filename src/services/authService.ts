@@ -397,19 +397,30 @@ class AuthService {
       console.warn('Firebase signOut error:', e);
     }
 
-    if (this.currentUser?.accessToken && window.google?.accounts?.oauth2) {
-      try {
-        window.google.accounts.oauth2.revoke(this.currentUser.accessToken, () => {
-          console.log('Access token revoked');
-        });
-      } catch (e) {
-        console.warn('Error revoking token:', e);
-      }
-    }
+    // Do NOT call google.accounts.oauth2.revoke on simple sign-out.
+    // Revoking destroys all user consent and grants on Google servers, which causes
+    // Drive API to lose permissions to existing music files when reconnecting!
     this.currentUser = null;
     localStorage.removeItem(AUTH_STORAGE_KEY);
     swService.clearToken();
     this.notifyListeners();
+  }
+
+  /**
+   * Explicitly revokes Google OAuth permissions from Google servers if the user chooses to unlink completely.
+   */
+  public async revokeAccountAccess(): Promise<void> {
+    const token = this.currentUser?.accessToken;
+    await this.signOut();
+    if (token && typeof window !== 'undefined' && window.google?.accounts?.oauth2) {
+      try {
+        window.google.accounts.oauth2.revoke(token, () => {
+          console.log('Google OAuth grant revoked on user request');
+        });
+      } catch (e) {
+        console.warn('Error revoking grant:', e);
+      }
+    }
   }
 
   public getUser(): DriveAuthUser | null {

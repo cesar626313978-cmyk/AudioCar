@@ -81,15 +81,17 @@ class CloudService {
 
   public async syncLibrary(
     targetProviderId?: CloudProviderType,
-    onProgress?: (progress: { percent: number; step: string }) => void
+    onProgress?: (progress: { percent: number; step: string }) => void,
+    onPartialTracks?: (tracks: AudioTrack[], folders?: DriveFolder[]) => void
   ): Promise<{ tracks: AudioTrack[]; folders: DriveFolder[] }> {
-    const res = await this.syncLibraryDetailed(targetProviderId, onProgress);
+    const res = await this.syncLibraryDetailed(targetProviderId, onProgress, onPartialTracks);
     return { tracks: res.tracks, folders: res.folders };
   }
 
   public async syncLibraryDetailed(
     targetProviderId?: CloudProviderType,
-    onProgress?: (progress: { percent: number; step: string }) => void
+    onProgress?: (progress: { percent: number; step: string }) => void,
+    onPartialTracks?: (tracks: AudioTrack[], folders?: DriveFolder[]) => void
   ): Promise<CloudSyncResult> {
     const provider = targetProviderId ? this.getProvider(targetProviderId) : this.getActiveProvider();
     
@@ -128,9 +130,20 @@ class CloudService {
       try {
         onProgress?.({ percent: 35, step: 'Explorando estructura de carpetas...' });
         const folders = await provider.listFolders();
+        if (folders.length > 0) {
+          await dbService.saveFolders(folders).catch(() => {});
+          // Notify folders discovered
+          onPartialTracks?.([], folders);
+        }
 
         onProgress?.({ percent: 45, step: `Descubriendo canciones en ${folders.length} carpetas...` });
-        const tracks = await (provider as any).listTracks(undefined, onProgress);
+        const tracks = await (provider as any).listTracks(
+          undefined,
+          onProgress,
+          (partialTracks: AudioTrack[]) => {
+            onPartialTracks?.(partialTracks, folders);
+          }
+        );
 
         if (tracks.length > 0) {
           await dbService.saveTracks(tracks).catch(() => {});

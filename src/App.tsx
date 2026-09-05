@@ -32,6 +32,7 @@ export function App() {
   const [tracks, setTracks] = useState<AudioTrack[]>([]);
   const [folders, setFolders] = useState<DriveFolder[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncProgressPercent, setSyncProgressPercent] = useState<number>(0);
   const [syncProgressStep, setSyncProgressStep] = useState<string>('');
   const [activeOverlay, setActiveOverlay] = useState<ActiveOverlay>('none');
@@ -185,13 +186,47 @@ export function App() {
 
   const syncCloudContent = async (isManual: boolean = false) => {
     setIsLoading(true);
+    setIsSyncing(true);
     setSyncProgressPercent(10);
     setSyncProgressStep('Conectando con Google Drive...');
     try {
-      const syncResult = await cloudService.syncLibraryDetailed(undefined, (progress) => {
-        setSyncProgressPercent(progress.percent);
-        setSyncProgressStep(progress.step);
-      });
+      // Stream partial tracks and folders into player state as soon as discovered
+      const handlePartialStream = async (partialTracks: AudioTrack[], partialFolders?: DriveFolder[]) => {
+        const hideDemo = await dbService.isDemoTracksHidden();
+        const mergedMap = new Map<string, AudioTrack>();
+        if (!hideDemo) {
+          DEMO_TRACKS.forEach((t) => mergedMap.set(t.id, t));
+        }
+        partialTracks.forEach((t) => mergedMap.set(t.id, t));
+        const updatedList = Array.from(mergedMap.values());
+
+        if (partialTracks.length > 0) {
+          setTracks(updatedList);
+          audioEngine.setAllAvailableTracks(updatedList);
+
+          // Update player queue immediately so user can press play right away!
+          const currentTrack = audioEngine.getCurrentTrack();
+          if (!currentTrack || currentTrack.source === 'demo') {
+            audioEngine.setQueue(partialTracks, 0, false);
+          }
+        }
+
+        if (partialFolders && partialFolders.length > 0) {
+          setFolders(partialFolders);
+        }
+
+        // UNLOCK the library and player immediately so user can use the app without waiting!
+        setIsLoading(false);
+      };
+
+      const syncResult = await cloudService.syncLibraryDetailed(
+        undefined,
+        (progress) => {
+          setSyncProgressPercent(progress.percent);
+          setSyncProgressStep(progress.step);
+        },
+        handlePartialStream
+      );
       const hideDemoTracks = await dbService.isDemoTracksHidden();
 
       if (isManual) {
@@ -249,10 +284,11 @@ export function App() {
       console.warn('Error syncing cloud content:', err);
     } finally {
       setIsLoading(false);
+      setIsSyncing(false);
       setTimeout(() => {
         setSyncProgressPercent(0);
         setSyncProgressStep('');
-      }, 1200);
+      }, 1500);
     }
   };
 
@@ -308,7 +344,7 @@ export function App() {
         user={user}
         activeOverlay={activeOverlay}
         isPlaying={playerState.isPlaying}
-        isSyncing={isLoading}
+        isSyncing={isSyncing}
         syncPercent={syncProgressPercent}
         syncStep={syncProgressStep}
         onOpenPlayer={() => setActiveOverlay('none')}
@@ -339,7 +375,7 @@ export function App() {
           currentTrackId={audioEngine.getCurrentTrack()?.id}
           onRefreshDrive={() => syncCloudContent(true)}
           isLoading={isLoading}
-          isSyncing={isLoading}
+          isSyncing={isSyncing}
           syncPercent={syncProgressPercent}
           syncStep={syncProgressStep}
           onDeleteDemoTracks={handleDeleteDemoTracks}
