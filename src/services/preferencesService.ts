@@ -28,7 +28,6 @@ export const DEFAULT_PREFERENCES: Omit<UserPreferences, 'email'> = {
   normalizationPreset: 'balanced',
   bufferAheadCount: 3,
   theme: 'dark',
-  hideDemoTracks: false,
   ledColor: 'sport-red',
   isLedPulseActive: true,
   lastUpdated: 0
@@ -233,8 +232,7 @@ class PreferencesService {
         fadeDur,
         normEnabled,
         normPreset,
-        bufferCount,
-        hideDemo
+        bufferCount
       ] = await Promise.all([
         dbService.getSetting<number>('player_volume', 0.85),
         dbService.getSetting<PlaybackMode>('player_mode', 'linear'),
@@ -247,8 +245,7 @@ class PreferencesService {
         dbService.getSetting<number>('player_fade_dur', 3),
         dbService.getSetting<boolean>('player_norm_enabled', true),
         dbService.getSetting<'balanced' | 'dynamic' | 'night'>('player_norm_preset', 'balanced'),
-        dbService.getSetting<number>('player_buffer_ahead', 3),
-        dbService.isDemoTracksHidden()
+        dbService.getSetting<number>('player_buffer_ahead', 3)
       ]);
 
       const theme = (localStorage.getItem('audiocar_theme') as 'dark' | 'light') || 'dark';
@@ -269,7 +266,6 @@ class PreferencesService {
         normalizationPreset: normPreset,
         bufferAheadCount: bufferCount,
         theme,
-        hideDemoTracks: hideDemo,
         ledColor,
         isLedPulseActive
       };

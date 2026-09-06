@@ -22,6 +22,7 @@ interface SyncNoticeModalProps {
   onConnectSuccess: () => void;
   onFolderCreated: () => void;
   onPickFolder?: () => void;
+  onReauthorize?: () => void;
 }
 
 export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
@@ -34,7 +35,8 @@ export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
   onClose,
   onConnectSuccess,
   onFolderCreated,
-  onPickFolder
+  onPickFolder,
+  onReauthorize
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -220,8 +222,8 @@ export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
           </>
         )}
 
-        {/* 3. STATE: SYNC SUCCESS & MIMUSICA DETECTED */}
-        {type === 'sync_success' && (
+        {/* 3. STATE: SYNC SUCCESS */}
+        {type === 'sync_success' && tracksCount > 0 && (
           <>
             <div className="flex items-center gap-4">
               <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center shrink-0">
@@ -229,17 +231,17 @@ export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
               </div>
               <div>
                 <h3 className="text-xl font-extrabold text-white tracking-tight">
-                  Carpeta "{rootFolderName || 'mimusica'}" Detectada
+                  Carpeta "{rootFolderName || 'mimusica'}" Sincronizada
                 </h3>
                 <p className="text-xs text-emerald-400 font-semibold mt-0.5">
-                  Sincronización completada con éxito
+                  {tracksCount} canciones listas para reproducir
                 </p>
               </div>
             </div>
 
             <div className="bg-[#141414] border border-neutral-800/80 rounded-2xl p-4 space-y-2 text-sm text-neutral-300">
               <p>
-                Se ha detectado correctamente la carpeta raíz <span className="text-emerald-400 font-bold font-mono">/{rootFolderName || 'mimusica'}</span> en Google Drive ({userEmail}).
+                Se ha sincronizado correctamente la carpeta raíz <span className="text-emerald-400 font-bold font-mono">/{rootFolderName || 'mimusica'}</span> en Google Drive ({userEmail}).
               </p>
               <div className="grid grid-cols-2 gap-2 pt-1 text-xs">
                 <div className="bg-black/60 p-2.5 rounded-xl border border-neutral-800">
@@ -251,26 +253,6 @@ export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
                   <span className="text-white font-mono text-base font-bold">{tracksCount}</span>
                 </div>
               </div>
-
-              {tracksCount === 0 && (
-                <div className="bg-amber-950/30 border border-amber-800/50 rounded-xl p-3 text-xs text-amber-200/90 space-y-2 mt-2">
-                  <p>
-                    No se encontraron canciones compatibles (.mp3, .flac, .m4a, etc.) en esta carpeta. Si tus canciones se encuentran en otra carpeta de Google Drive, puedes seleccionarla directamente:
-                  </p>
-                  {onPickFolder && (
-                    <button
-                      onClick={() => {
-                        onClose();
-                        onPickFolder();
-                      }}
-                      className="w-full py-2.5 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs flex items-center justify-center gap-2 border border-amber-500/40 transition-colors cursor-pointer"
-                    >
-                      <FolderOpen className="w-4 h-4 text-amber-400" />
-                      Elegir otra carpeta de música con Google Picker
-                    </button>
-                  )}
-                </div>
-              )}
             </div>
 
             <div className="flex justify-end pt-2">
@@ -278,7 +260,77 @@ export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
                 onClick={onClose}
                 className="w-full hitbox-48 h-12 rounded-xl bg-white hover:bg-neutral-200 text-black font-extrabold text-xs uppercase tracking-wider transition-all flex items-center justify-center cursor-pointer shadow-lg"
               >
-                Aceptar
+                Aceptar y Reproducir
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* 4. STATE: FOLDER DETECTED BUT 0 TRACKS FOUND */}
+        {type === 'sync_success' && tracksCount === 0 && (
+          <>
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-7 h-7 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-xl font-extrabold text-white tracking-tight">
+                  0 Canciones Detectadas
+                </h3>
+                <p className="text-xs text-amber-400 font-semibold mt-0.5">
+                  Carpeta /{rootFolderName || 'mimusica'} vacía o sin permisos de lectura
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-[#141414] border border-neutral-800/80 rounded-2xl p-4 space-y-3 text-sm text-neutral-300">
+              <p className="text-xs leading-relaxed text-neutral-300">
+                Google Drive está conectado ({userEmail}), pero no se detectó ninguna pista de audio en la carpeta <span className="text-amber-400 font-bold font-mono">/{rootFolderName || 'mimusica'}</span>.
+              </p>
+
+              <div className="bg-black/50 border border-neutral-800 rounded-xl p-3 space-y-2 text-xs">
+                <p className="font-semibold text-white">¿Por qué puede ocurrir esto?</p>
+                <ul className="list-disc list-inside space-y-1 text-neutral-400">
+                  <li>Tus canciones están en otra carpeta de Google Drive.</li>
+                  <li>Google necesita autorización para leer los archivos subidos desde tu PC o móvil.</li>
+                </ul>
+              </div>
+
+              <div className="space-y-2 pt-1">
+                {onPickFolder && (
+                  <button
+                    onClick={() => {
+                      onClose();
+                      onPickFolder();
+                    }}
+                    className="w-full h-11 rounded-xl bg-white hover:bg-neutral-200 text-black font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md"
+                  >
+                    <FolderOpen className="w-4 h-4 text-black" />
+                    Elegir mi carpeta de música (Google Picker)
+                  </button>
+                )}
+
+                {onReauthorize && (
+                  <button
+                    onClick={() => {
+                      onClose();
+                      onReauthorize();
+                    }}
+                    className="w-full h-11 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all"
+                  >
+                    <RefreshCw className="w-4 h-4 text-amber-400" />
+                    Conceder permisos de lectura en Drive
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                onClick={onClose}
+                className="w-full hitbox-48 h-10 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 font-bold text-xs tracking-wider transition-all flex items-center justify-center cursor-pointer"
+              >
+                Cerrar
               </button>
             </div>
           </>

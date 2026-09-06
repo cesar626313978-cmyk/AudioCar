@@ -155,13 +155,17 @@ export class DriveService {
     };
   }
 
+  public clearRootFolderCache(): void {
+    this.cachedMusicRootFolder = null;
+  }
+
   /**
    * Finds the user's dedicated root folder ("mimusica" or the user-selected folder via Google Picker).
    * Probes candidate folders to automatically select the one with actual audio/subfolder content,
    * avoiding empty legacy or duplicate folders.
    */
-  async getMusicRootFolder(createIfNotFound: boolean = false): Promise<DriveFolder | null> {
-    if (this.cachedMusicRootFolder) {
+  async getMusicRootFolder(createIfNotFound: boolean = false, forceRefresh: boolean = false): Promise<DriveFolder | null> {
+    if (!forceRefresh && this.cachedMusicRootFolder) {
       return this.cachedMusicRootFolder;
     }
 
@@ -524,13 +528,64 @@ export class DriveService {
     if (!token) throw new Error('Usuario no autenticado en Google Drive');
 
     onProgress?.({ percent: 20, step: 'Localizando carpeta /mimusica...' });
-    const musicRoot = await this.getMusicRootFolder(false);
+    let musicRoot = await this.getMusicRootFolder(false);
     if (!musicRoot) {
       return [];
     }
 
     onProgress?.({ percent: 35, step: 'Explorando biblioteca en 1 solo salto...' });
-    const { folders: flatFolders, tracks: flatTracks } = await this.fetchLibraryHierarchy(musicRoot.id, token);
+    let { folders: flatFolders, tracks: flatTracks } = await this.fetchLibraryHierarchy(musicRoot.id, token);
+
+    // Fallback: If 0 tracks found in the detected folder, probe Drive globally for ANY audio files
+    if (flatTracks.length === 0) {
+      console.log(`[DriveService] Folder "${musicRoot.name}" returned 0 tracks. Probing Drive for any audio files...`);
+      onProgress?.({ percent: 45, step: 'Buscando pistas de audio en Google Drive...' });
+
+      try {
+        const audioProbeQ = encodeURIComponent(
+          `trashed = false and (mimeType contains 'audio' or name contains '.mp3' or name contains '.flac' or name contains '.m4a' or name contains '.wav' or name contains '.ogg' or name contains '.aac')`
+        );
+        const probeUrl = `${DRIVE_API_URL}/files?q=${audioProbeQ}&fields=files(id, name, parents, mimeType, size)&pageSize=10`;
+        const probeRes = await fetchWithDriveBackoff(probeUrl, { headers: this.getHeaders(token) });
+
+        if (probeRes.ok) {
+          const probeData = await probeRes.json();
+          const sampleFiles = probeData.files || [];
+          if (sampleFiles.length > 0) {
+            console.log(`[DriveService] Found ${sampleFiles.length} audio files in Drive! Checking parent folder...`);
+            const sampleParentId = sampleFiles[0].parents?.[0];
+            if (sampleParentId && sampleParentId !== musicRoot.id) {
+              const parentRes = await fetchWithDriveBackoff(
+                `${DRIVE_API_URL}/files/${sampleParentId}?fields=id, name, parents`,
+                { headers: this.getHeaders(token) }
+              );
+              if (parentRes.ok) {
+                const parentFolder = await parentRes.json();
+                console.log(`[DriveService] Automatically redirecting music root to folder: "${parentFolder.name}" (${parentFolder.id})`);
+                const newRoot: DriveFolder = {
+                  id: parentFolder.id,
+                  name: parentFolder.name || 'Música',
+                  parentId: parentFolder.parents?.[0] || 'root',
+                  path: `/${parentFolder.name || 'Música'}`
+                };
+                this.cachedMusicRootFolder = newRoot;
+                this.setSelectedMusicFolder(newRoot);
+
+                // Re-fetch hierarchy using this populated music folder!
+                const retryHierarchy = await this.fetchLibraryHierarchy(newRoot.id, token);
+                if (retryHierarchy.tracks.length > 0) {
+                  flatFolders = retryHierarchy.folders;
+                  flatTracks = retryHierarchy.tracks;
+                  musicRoot = newRoot;
+                }
+              }
+            }
+          }
+        }
+      } catch (probeErr) {
+        console.warn('Global audio probe error:', probeErr);
+      }
+    }
 
     // Build hierarchy map entirely in memory
     const hierarchy = new Map<string, { id: string; name: string; parentId?: string; path: string }>();

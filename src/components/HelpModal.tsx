@@ -260,7 +260,7 @@ export const HelpModal: React.FC<HelpModalProps> = ({
             <div className="border-l-2 border-amber-400 pl-4">
               <h3 className="text-xl font-black text-white">¿Cómo empezar en 3 sencillos pasos?</h3>
               <p className="text-sm text-neutral-400">
-                AudioCar está diseñado para funcionar al instante, tanto si quieres probarlo de inmediato como si deseas escuchar tu colección completa.
+                AudioCar te permite reproducir tu música directamente desde tu Google Drive con la mejor calidad y controles para tu vehículo.
               </p>
             </div>
 
@@ -270,33 +270,12 @@ export const HelpModal: React.FC<HelpModalProps> = ({
               <div className="bg-[#121212] border border-neutral-800 rounded-3xl p-5 sm:p-6 flex flex-col justify-between relative overflow-hidden">
                 <div className="absolute top-4 right-4 text-3xl font-black text-neutral-800/80 font-mono">01</div>
                 <div>
-                  <div className="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400 mb-4">
-                    <Play className="w-6 h-6 fill-current" />
-                  </div>
-                  <h4 className="text-base font-bold text-white mb-2">Opción A: Escuchar Demo</h4>
-                  <p className="text-xs text-neutral-400 leading-relaxed mb-4">
-                    La app incluye <strong className="text-neutral-200">6 canciones de prueba precargadas</strong> en memoria para probar el ecualizador DSP, los modos de mezcla y la iluminación LED inmediatamente sin configurar nada.
-                  </p>
-                </div>
-                <button
-                  onClick={onClose}
-                  className="w-full py-2.5 px-4 rounded-xl bg-white text-black font-bold text-xs uppercase tracking-wider hover:bg-neutral-200 transition-colors flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <Play className="w-3.5 h-3.5 fill-current" />
-                  Reproducir Ahora
-                </button>
-              </div>
-
-              {/* Paso 2 */}
-              <div className="bg-[#121212] border border-neutral-800 rounded-3xl p-5 sm:p-6 flex flex-col justify-between relative overflow-hidden">
-                <div className="absolute top-4 right-4 text-3xl font-black text-neutral-800/80 font-mono">02</div>
-                <div>
                   <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-4">
                     <Cloud className="w-6 h-6" />
                   </div>
-                  <h4 className="text-base font-bold text-white mb-2">Opción B: Tu Google Drive</h4>
+                  <h4 className="text-base font-bold text-white mb-2">Conectar Google Drive</h4>
                   <p className="text-xs text-neutral-400 leading-relaxed mb-4">
-                    Conecta tu cuenta de Google. Crea una carpeta llamada <code className="text-amber-300 bg-neutral-900 px-1 py-0.5 rounded border border-neutral-800">/mimusica</code> o escanea cualquier carpeta con tus archivos MP3, FLAC o WAV.
+                    Inicia sesión con tu cuenta de Google para sincronizar tus pistas de audio de forma segura con un solo toque.
                   </p>
                 </div>
                 <button
@@ -311,16 +290,40 @@ export const HelpModal: React.FC<HelpModalProps> = ({
                 </button>
               </div>
 
+              {/* Paso 2 */}
+              <div className="bg-[#121212] border border-neutral-800 rounded-3xl p-5 sm:p-6 flex flex-col justify-between relative overflow-hidden">
+                <div className="absolute top-4 right-4 text-3xl font-black text-neutral-800/80 font-mono">02</div>
+                <div>
+                  <div className="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400 mb-4">
+                    <FolderTree className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-base font-bold text-white mb-2">Tu Carpeta de Música</h4>
+                  <p className="text-xs text-neutral-400 leading-relaxed mb-4">
+                    Crea una carpeta llamada <code className="text-amber-300 bg-neutral-900 px-1 py-0.5 rounded border border-neutral-800">/mimusica</code> o selecciona cualquier carpeta con tus archivos MP3, FLAC, WAV, AAC o M4A.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    onClose();
+                    onOpenCloud();
+                  }}
+                  className="w-full py-2.5 px-4 rounded-xl bg-white text-black font-bold text-xs uppercase tracking-wider hover:bg-neutral-200 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <FolderTree className="w-3.5 h-3.5" />
+                  Configurar Carpeta
+                </button>
+              </div>
+
               {/* Paso 3 */}
               <div className="bg-[#121212] border border-neutral-800 rounded-3xl p-5 sm:p-6 flex flex-col justify-between relative overflow-hidden">
                 <div className="absolute top-4 right-4 text-3xl font-black text-neutral-800/80 font-mono">03</div>
                 <div>
                   <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mb-4">
-                    <FolderTree className="w-6 h-6" />
+                    <Play className="w-6 h-6 fill-current" />
                   </div>
-                  <h4 className="text-base font-bold text-white mb-2">Explorar y Organizar</h4>
+                  <h4 className="text-base font-bold text-white mb-2">Explorar y Disfrutar</h4>
                   <p className="text-xs text-neutral-400 leading-relaxed mb-4">
-                    En la <strong className="text-neutral-200">Biblioteca</strong> puedes navegar por carpetas, buscar canciones por título o artista, y reproducir discos enteros de un toque.
+                    En la <strong className="text-neutral-200">Biblioteca</strong> puedes navegar por carpetas, buscar canciones por título o artista, y reproducir álbumes completos al instante.
                   </p>
                 </div>
                 <button
@@ -330,7 +333,7 @@ export const HelpModal: React.FC<HelpModalProps> = ({
                   }}
                   className="w-full py-2.5 px-4 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold text-xs uppercase tracking-wider transition-colors flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <FolderTree className="w-3.5 h-3.5" />
+                  <Play className="w-3.5 h-3.5 fill-current" />
                   Abrir Biblioteca
                 </button>
               </div>

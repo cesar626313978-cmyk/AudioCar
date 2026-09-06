@@ -516,7 +516,7 @@ const TeslaDashboardSimulatorComponent: React.FC<TeslaDashboardSimulatorProps> =
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 truncate">
                         <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-neutral-400 truncate">
-                          {currentTrack?.album || 'AudioCar Cloud'}
+                          {currentTrack?.album || 'AudioCar'}
                         </span>
                       </div>
 
@@ -527,13 +527,13 @@ const TeslaDashboardSimulatorComponent: React.FC<TeslaDashboardSimulatorProps> =
 
                     <div className="min-h-[1.75rem] sm:min-h-[2rem] flex items-center">
                       <h1 className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight truncate leading-tight w-full">
-                        {currentTrack?.title || currentTrack?.name || 'Select a song'}
+                        {currentTrack?.title || currentTrack?.name || 'Sin canción seleccionada'}
                       </h1>
                     </div>
 
                     <div className="flex items-center justify-between gap-3 min-h-[1.25rem]">
                       <p className="text-xs sm:text-sm font-medium text-neutral-400 truncate">
-                        {currentTrack?.artist || 'Google Drive Cloud Audio'}
+                        {currentTrack?.artist || 'Conecta Google Drive para reproducir'}
                       </p>
 
                       {/* Inline Compact Spectrum Visualizer */}

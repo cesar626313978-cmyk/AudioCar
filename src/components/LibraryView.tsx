@@ -6,7 +6,7 @@
  * - Instant search filter with audio and artwork format badges
  * - Touch-friendly track cards (min 60px height)
  * - Drive sync status & refresh button
- * - Option to delete DEMO songs or individual tracks
+ * - Option to delete individual tracks from cache
  */
 
 import React, { useState, useMemo } from 'react';
@@ -25,8 +25,7 @@ import {
   RefreshCw,
   Folder,
   FolderTree,
-  Trash2,
-  RotateCcw
+  Trash2
 } from 'lucide-react';
 
 interface LibraryViewProps {
@@ -36,8 +35,6 @@ interface LibraryViewProps {
   onRefreshDrive: () => Promise<void>;
   isLoading: boolean;
   onSelectFolder: (folderId: string) => void;
-  onDeleteDemoTracks?: () => void;
-  onRestoreDemoTracks?: () => void;
   onDeleteTrack?: (trackId: string) => void;
   initialTab?: string;
 }
@@ -49,8 +46,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   onRefreshDrive,
   isLoading,
   onSelectFolder,
-  onDeleteDemoTracks,
-  onRestoreDemoTracks,
   onDeleteTrack,
   initialTab = 'folders'
 }) => {
@@ -65,10 +60,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
-
-  const demoTracksCount = useMemo(() => {
-    return tracks.filter((t) => t.source === 'demo' || t.id.startsWith('demo_')).length;
-  }, [tracks]);
 
   const filteredTracks = useMemo(() => {
     return tracks.filter((track) => {
@@ -154,25 +145,12 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             Biblioteca de Audio
           </h2>
           <p className="text-sm text-neutral-400 mt-0.5">
-            {tracks.length} pistas disponibles ({tracks.filter((t) => t.source === 'drive').length} en Google Drive
-            {demoTracksCount > 0 ? `, ${demoTracksCount} DEMO` : ''})
+            {tracks.length} pistas disponibles ({tracks.filter((t) => t.source === 'drive').length} en Google Drive)
           </p>
         </div>
 
         {/* Action buttons */}
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Delete DEMO tracks button */}
-          {demoTracksCount > 0 && onDeleteDemoTracks && (
-            <button
-              onClick={onDeleteDemoTracks}
-              className="hitbox-48 px-3.5 py-2 rounded-full bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-800 text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-              title="Eliminar todas las canciones DEMO de prueba"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-red-400" />
-              <span>Eliminar DEMO ({demoTracksCount})</span>
-            </button>
-          )}
-
           <button
             onClick={() => onRefreshDrive()}
             disabled={isLoading}
@@ -356,22 +334,12 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                   <p className="text-xs text-neutral-500 max-w-md mx-auto">
                     {searchQuery 
                       ? 'Prueba con otro término de búsqueda' 
-                      : 'Sube tus canciones a la carpeta "mimusica" en Google Drive y pulsa "Sincronizar Drive".'}
+                      : 'Sube tus canciones a tu carpeta de Google Drive y pulsa "Sincronizar Drive".'}
                   </p>
-                  {demoTracksCount === 0 && onRestoreDemoTracks && (
-                    <button
-                      onClick={onRestoreDemoTracks}
-                      className="mt-2 hitbox-48 px-4 py-2 rounded-full bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-bold uppercase tracking-wider border border-neutral-700 inline-flex items-center gap-2 cursor-pointer"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span>Cargar canciones DEMO</span>
-                    </button>
-                  )}
                 </div>
               ) : (
                 filteredTracks.map((track, idx) => {
                   const isPlaying = track.id === currentTrackId;
-                  const isDemo = track.source === 'demo' || track.id.startsWith('demo_');
                   return (
                     <div
                       key={track.id}
@@ -420,11 +388,9 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                                 {track.artworkFormat}
                               </span>
                             )}
-                            {track.source === 'drive' ? (
+                            {track.source === 'drive' && (
                               <span className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-300 font-mono border border-neutral-700">DRIVE</span>
-                            ) : track.source === 'demo' ? (
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-300 font-mono border border-amber-800">DEMO</span>
-                            ) : null}
+                            )}
                           </div>
                         </div>
                       </div>
@@ -453,13 +419,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                           />
                         </button>
 
-                        {/* Delete individual DEMO track */}
-                        {isDemo && onDeleteTrack && (
+                        {/* Delete track from library cache */}
+                        {onDeleteTrack && (
                           <button
                             type="button"
                             onClick={(e) => handleDeleteSingleTrack(e, track.id)}
                             className="hitbox-48 w-9 h-9 md:w-10 md:h-10 rounded-full text-neutral-500 hover:text-red-400 hover:bg-neutral-800 transition-colors flex items-center justify-center cursor-pointer"
-                            title="Delete DEMO track"
+                            title="Eliminar de la biblioteca"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>

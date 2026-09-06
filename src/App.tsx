@@ -12,7 +12,6 @@ import { cloudService } from './services/cloudService';
 import { dbService } from './services/dbService';
 import { preferencesService } from './services/preferencesService';
 import { driveService } from './services/driveService';
-import { DEMO_TRACKS } from './data/demoTracks';
 
 // Components
 import { Header } from './components/Header';
@@ -150,41 +149,17 @@ export function App() {
     try {
       const cachedTracks = await dbService.getAllTracks();
       const cachedFolders = await dbService.getAllFolders();
-      const hideDemoTracks = await dbService.isDemoTracksHidden();
 
-      // Merge cached tracks with demo tracks (ensuring latest demo streamUrls)
-      const mergedMap = new Map<string, AudioTrack>();
-      if (!hideDemoTracks) {
-        DEMO_TRACKS.forEach((t) => mergedMap.set(t.id, t));
-      }
-      cachedTracks.forEach((t) => {
-        if (hideDemoTracks && (t.source === 'demo' || t.id.startsWith('demo_'))) {
-          return;
-        }
-        if (t.source === 'demo' || t.id.startsWith('demo_')) {
-          const fresh = DEMO_TRACKS.find((d) => d.id === t.id);
-          if (fresh) {
-            mergedMap.set(t.id, { ...fresh, isFavorite: t.isFavorite ?? fresh.isFavorite });
-            return;
-          }
-        }
-        mergedMap.set(t.id, t);
-      });
-
-      const mergedList = Array.from(mergedMap.values());
-      setTracks(mergedList);
+      setTracks(cachedTracks);
       setFolders(cachedFolders);
-      audioEngine.setAllAvailableTracks(mergedList);
+      audioEngine.setAllAvailableTracks(cachedTracks);
 
-      // Set initial audio queue if empty
-      if (audioEngine.getState().queue.length === 0 && mergedList.length > 0) {
-        audioEngine.setQueue(mergedList, 0, false);
+      // Set initial audio queue if empty and cached tracks exist
+      if (audioEngine.getState().queue.length === 0 && cachedTracks.length > 0) {
+        audioEngine.setQueue(cachedTracks, 0, false);
       }
     } catch (e) {
       console.warn('Initial data load warning:', e);
-      if (audioEngine.getState().queue.length === 0) {
-        audioEngine.setQueue(DEMO_TRACKS, 0, false);
-      }
     }
   };
 
@@ -196,21 +171,13 @@ export function App() {
     try {
       // Stream partial tracks and folders into player state as soon as discovered
       const handlePartialStream = async (partialTracks: AudioTrack[], partialFolders?: DriveFolder[]) => {
-        const hideDemo = await dbService.isDemoTracksHidden();
-        const mergedMap = new Map<string, AudioTrack>();
-        if (!hideDemo) {
-          DEMO_TRACKS.forEach((t) => mergedMap.set(t.id, t));
-        }
-        partialTracks.forEach((t) => mergedMap.set(t.id, t));
-        const updatedList = Array.from(mergedMap.values());
-
         if (partialTracks.length > 0) {
-          setTracks(updatedList);
-          audioEngine.setAllAvailableTracks(updatedList);
+          setTracks(partialTracks);
+          audioEngine.setAllAvailableTracks(partialTracks);
 
-          // Update player queue immediately so user can press play right away!
+          // Update player queue if empty so user can press play right away!
           const currentTrack = audioEngine.getCurrentTrack();
-          if (!currentTrack || currentTrack.source === 'demo') {
+          if (!currentTrack) {
             audioEngine.setQueue(partialTracks, 0, false);
           }
         }
@@ -231,7 +198,6 @@ export function App() {
         },
         handlePartialStream
       );
-      const hideDemoTracks = await dbService.isDemoTracksHidden();
 
       if (isManual) {
         if (syncResult.status === 'not_authenticated') {
@@ -266,24 +232,14 @@ export function App() {
       const cloudTracks = syncResult.tracks || [];
       const cloudFolders = syncResult.folders || [];
 
-      // Merge with demo tracks (unless user removed them)
-      const mergedMap = new Map<string, AudioTrack>();
-      if (!hideDemoTracks) {
-        DEMO_TRACKS.forEach((t) => mergedMap.set(t.id, t));
-      }
-      cloudTracks.forEach((t) => mergedMap.set(t.id, t));
-
-      const updatedTracks = Array.from(mergedMap.values());
-      setTracks(updatedTracks);
+      setTracks(cloudTracks);
       setFolders(cloudFolders);
-      audioEngine.setAllAvailableTracks(updatedTracks);
+      audioEngine.setAllAvailableTracks(cloudTracks);
 
-      // Update player queue if it only had demo tracks or is empty
+      // Update player queue if empty
       const currentTrack = audioEngine.getCurrentTrack();
-      if (!currentTrack || currentTrack.source === 'demo') {
-        if (cloudTracks.length > 0) {
-          audioEngine.setQueue(cloudTracks, 0, false);
-        }
+      if (!currentTrack && cloudTracks.length > 0) {
+        audioEngine.setQueue(cloudTracks, 0, false);
       }
     } catch (err) {
       console.warn('Error syncing cloud content:', err);
@@ -297,50 +253,17 @@ export function App() {
     }
   };
 
-  const handleDeleteDemoTracks = async () => {
-    await dbService.deleteDemoTracks();
-    preferencesService.updateCurrentPreference('hideDemoTracks', true);
-    const remaining = tracks.filter((t) => t.source !== 'demo' && !t.id.startsWith('demo_'));
-    setTracks(remaining);
-
-    // Update queue if it contained demo tracks
-    const currentQueue = audioEngine.getState().queue;
-    const filteredQueue = currentQueue.filter((t) => t.source !== 'demo' && !t.id.startsWith('demo_'));
-    if (filteredQueue.length > 0) {
-      audioEngine.setQueue(filteredQueue, 0, false);
-    } else if (remaining.length > 0) {
-      audioEngine.setQueue(remaining, 0, false);
-    }
-  };
-
-  const handleRestoreDemoTracks = async () => {
-    await dbService.setDemoTracksHidden(false);
-    preferencesService.updateCurrentPreference('hideDemoTracks', false);
-    await dbService.saveTracks(DEMO_TRACKS);
-    const mergedMap = new Map<string, AudioTrack>();
-    DEMO_TRACKS.forEach((t) => mergedMap.set(t.id, t));
-    tracks.forEach((t) => mergedMap.set(t.id, t));
-    const merged = Array.from(mergedMap.values());
-    setTracks(merged);
-    if (audioEngine.getState().queue.length === 0 && merged.length > 0) {
-      audioEngine.setQueue(merged, 0, false);
-    }
-  };
-
   const handleDeleteSingleTrack = async (trackId: string) => {
     await dbService.deleteTrack(trackId);
     const remaining = tracks.filter((t) => t.id !== trackId);
     setTracks(remaining);
+    audioEngine.setAllAvailableTracks(remaining);
     const currentQueue = audioEngine.getState().queue;
     const filteredQueue = currentQueue.filter((t) => t.id !== trackId);
     if (filteredQueue.length !== currentQueue.length) {
-      if (filteredQueue.length > 0) {
-        audioEngine.setQueue(filteredQueue, 0, false);
-      }
+      audioEngine.setQueue(filteredQueue, 0, false);
     }
   };
-
-  const hasDemoTracks = tracks.some((t) => t.source === 'demo' || t.id.startsWith('demo_'));
 
   return (
     <div className={`w-screen h-screen overflow-hidden ${theme === 'light' ? 'theme-light bg-[#f1f3f6] text-[#0f172a]' : 'theme-dark bg-black text-white'} flex flex-col antialiased selection:bg-[#E82127] selection:text-white`}>
@@ -383,8 +306,6 @@ export function App() {
           isSyncing={isSyncing}
           syncPercent={syncProgressPercent}
           syncStep={syncProgressStep}
-          onDeleteDemoTracks={handleDeleteDemoTracks}
-          onRestoreDemoTracks={handleRestoreDemoTracks}
           onDeleteTrack={handleDeleteSingleTrack}
           onClose={() => setActiveOverlay('none')}
         />
@@ -394,9 +315,6 @@ export function App() {
         <AudioSettingsModal
           playerState={playerState}
           onClose={() => setActiveOverlay('none')}
-          hasDemoTracks={hasDemoTracks}
-          onDeleteDemoTracks={handleDeleteDemoTracks}
-          onRestoreDemoTracks={handleRestoreDemoTracks}
           allTracks={tracks}
           onOpenDonation={() => setActiveOverlay('donation')}
           onOpenContact={() => setActiveOverlay('contact')}
@@ -455,6 +373,17 @@ export function App() {
             const folder = await driveService.promptPickMusicFolder();
             if (folder) {
               await syncCloudContent(true);
+            }
+          }}
+          onReauthorize={async () => {
+            try {
+              setIsLoading(true);
+              await authService.requestSignIn({ forceConsent: true });
+              await syncCloudContent(true);
+            } catch (err) {
+              console.error('Re-auth error:', err);
+            } finally {
+              setIsLoading(false);
             }
           }}
         />
