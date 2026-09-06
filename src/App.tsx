@@ -11,6 +11,7 @@ import { authService } from './services/authService';
 import { cloudService } from './services/cloudService';
 import { dbService } from './services/dbService';
 import { preferencesService } from './services/preferencesService';
+import { driveService } from './services/driveService';
 import { DEMO_TRACKS } from './data/demoTracks';
 
 // Components
@@ -40,6 +41,7 @@ export function App() {
     isOpen: boolean;
     type: SyncNoticeType;
     userEmail?: string;
+    rootFolderName?: string;
     foldersCount?: number;
     tracksCount?: number;
     trackTitle?: string;
@@ -254,6 +256,7 @@ export function App() {
             isOpen: true,
             type: 'sync_success',
             userEmail: syncResult.userEmail,
+            rootFolderName: syncResult.rootFolderName,
             foldersCount: syncResult.foldersCount,
             tracksCount: syncResult.tracksCount
           });
@@ -438,6 +441,7 @@ export function App() {
         <SyncNoticeModal
           type={syncNotice.type}
           userEmail={syncNotice.userEmail}
+          rootFolderName={syncNotice.rootFolderName}
           foldersCount={syncNotice.foldersCount}
           tracksCount={syncNotice.tracksCount}
           trackTitle={syncNotice.trackTitle}
@@ -447,6 +451,12 @@ export function App() {
             audioEngine.play();
           }}
           onFolderCreated={() => syncCloudContent(true)}
+          onPickFolder={async () => {
+            const folder = await driveService.promptPickMusicFolder();
+            if (folder) {
+              await syncCloudContent(true);
+            }
+          }}
         />
       )}
     </div>

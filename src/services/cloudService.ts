@@ -136,7 +136,7 @@ class CloudService {
           onPartialTracks?.([], folders);
         }
 
-        onProgress?.({ percent: 45, step: `Descubriendo canciones en ${folders.length} carpetas...` });
+        onProgress?.({ percent: 45, step: `Descubriendo canciones en la biblioteca...` });
         const tracks = await (provider as any).listTracks(
           undefined,
           onProgress,
@@ -148,8 +148,15 @@ class CloudService {
         if (tracks.length > 0) {
           await dbService.saveTracks(tracks).catch(() => {});
         }
-        if (folders.length > 0) {
-          await dbService.saveFolders(folders).catch(() => {});
+
+        // Retrieve all discovered folders from database
+        const allDbFolders = await dbService.getAllFolders().catch(() => []);
+        // Subfolders count: exclude the root folder itself if present
+        const nonRootFolders = allDbFolders.filter((f) => f.id !== rootFolder.id);
+        const finalFolders = nonRootFolders.length > 0 ? nonRootFolders : folders;
+
+        if (finalFolders.length > 0) {
+          await dbService.saveFolders(finalFolders).catch(() => {});
         }
 
         onProgress?.({ percent: 100, step: `¡Sincronización completada! ${tracks.length} canciones listas.` });
@@ -161,9 +168,9 @@ class CloudService {
           rootFolderName: rootFolder.name,
           userEmail: user.email,
           tracksCount: tracks.length,
-          foldersCount: folders.length,
+          foldersCount: finalFolders.length,
           tracks,
-          folders
+          folders: finalFolders
         };
       } catch (err: any) {
         return {

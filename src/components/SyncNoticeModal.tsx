@@ -5,7 +5,7 @@
  */
 
 import React, { useState } from 'react';
-import { Cloud, FolderPlus, AlertTriangle, CheckCircle2, X, RefreshCw, LogIn } from 'lucide-react';
+import { Cloud, FolderPlus, AlertTriangle, CheckCircle2, X, RefreshCw, LogIn, FolderOpen } from 'lucide-react';
 import { authService } from '../services/authService';
 import { driveService } from '../services/driveService';
 
@@ -14,23 +14,27 @@ export type SyncNoticeType = 'not_connected' | 'mimusica_not_found' | 'sync_succ
 interface SyncNoticeModalProps {
   type: SyncNoticeType;
   userEmail?: string;
+  rootFolderName?: string;
   foldersCount?: number;
   tracksCount?: number;
   trackTitle?: string;
   onClose: () => void;
   onConnectSuccess: () => void;
   onFolderCreated: () => void;
+  onPickFolder?: () => void;
 }
 
 export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
   type,
   userEmail,
+  rootFolderName,
   foldersCount = 0,
   tracksCount = 0,
   trackTitle,
   onClose,
   onConnectSuccess,
-  onFolderCreated
+  onFolderCreated,
+  onPickFolder
 }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -225,7 +229,7 @@ export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
               </div>
               <div>
                 <h3 className="text-xl font-extrabold text-white tracking-tight">
-                  Carpeta "/mimusica" Detectada
+                  Carpeta "{rootFolderName || 'mimusica'}" Detectada
                 </h3>
                 <p className="text-xs text-emerald-400 font-semibold mt-0.5">
                   Sincronización completada con éxito
@@ -235,7 +239,7 @@ export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
 
             <div className="bg-[#141414] border border-neutral-800/80 rounded-2xl p-4 space-y-2 text-sm text-neutral-300">
               <p>
-                Se ha detectado correctamente la carpeta raíz <span className="text-emerald-400 font-bold font-mono">/mimusica</span> en Google Drive ({userEmail}).
+                Se ha detectado correctamente la carpeta raíz <span className="text-emerald-400 font-bold font-mono">/{rootFolderName || 'mimusica'}</span> en Google Drive ({userEmail}).
               </p>
               <div className="grid grid-cols-2 gap-2 pt-1 text-xs">
                 <div className="bg-black/60 p-2.5 rounded-xl border border-neutral-800">
@@ -247,6 +251,26 @@ export const SyncNoticeModal: React.FC<SyncNoticeModalProps> = ({
                   <span className="text-white font-mono text-base font-bold">{tracksCount}</span>
                 </div>
               </div>
+
+              {tracksCount === 0 && (
+                <div className="bg-amber-950/30 border border-amber-800/50 rounded-xl p-3 text-xs text-amber-200/90 space-y-2 mt-2">
+                  <p>
+                    No se encontraron canciones compatibles (.mp3, .flac, .m4a, etc.) en esta carpeta. Si tus canciones se encuentran en otra carpeta de Google Drive, puedes seleccionarla directamente:
+                  </p>
+                  {onPickFolder && (
+                    <button
+                      onClick={() => {
+                        onClose();
+                        onPickFolder();
+                      }}
+                      className="w-full py-2.5 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs flex items-center justify-center gap-2 border border-amber-500/40 transition-colors cursor-pointer"
+                    >
+                      <FolderOpen className="w-4 h-4 text-amber-400" />
+                      Elegir otra carpeta de música con Google Picker
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end pt-2">

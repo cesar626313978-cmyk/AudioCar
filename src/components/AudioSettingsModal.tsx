@@ -56,7 +56,7 @@ interface AudioSettingsModalProps {
   onOpenHelp?: () => void;
 }
 
-export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
+const AudioSettingsModalComponent: React.FC<AudioSettingsModalProps> = ({
   playerState,
   onClose,
   hasDemoTracks = false,
@@ -935,3 +935,5 @@ export const AudioSettingsModal: React.FC<AudioSettingsModalProps> = ({
   </div>
   );
 };
+
+export const AudioSettingsModal = React.memo(AudioSettingsModalComponent);

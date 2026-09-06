@@ -175,7 +175,7 @@ const LED_CONFIGS: Record<
   }
 };
 
-export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = ({
+const TeslaDashboardSimulatorComponent: React.FC<TeslaDashboardSimulatorProps> = ({
   playerState,
   onExitTeslaMode,
   onOpenSettings
@@ -963,3 +963,5 @@ export const TeslaDashboardSimulator: React.FC<TeslaDashboardSimulatorProps> = (
     </div>
   );
 };
+
+export const TeslaDashboardSimulator = React.memo(TeslaDashboardSimulatorComponent);

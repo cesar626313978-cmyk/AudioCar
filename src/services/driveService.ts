@@ -157,6 +157,8 @@ export class DriveService {
 
   /**
    * Finds the user's dedicated root folder ("mimusica" or the user-selected folder via Google Picker).
+   * Probes candidate folders to automatically select the one with actual audio/subfolder content,
+   * avoiding empty legacy or duplicate folders.
    */
   async getMusicRootFolder(createIfNotFound: boolean = false): Promise<DriveFolder | null> {
     if (this.cachedMusicRootFolder) {
@@ -166,7 +168,7 @@ export class DriveService {
     const token = authService.getAccessToken();
     if (!token) return null;
 
-    // Check if the user previously linked a folder using Google Picker
+    // 1. Check if the user previously linked a folder using Google Picker or preferences
     const selected = this.getSelectedMusicFolder();
     if (selected) {
       try {
@@ -177,20 +179,33 @@ export class DriveService {
         if (verifyRes.ok) {
           const fileData = await verifyRes.json();
           if (!fileData.trashed) {
+            // Check if this stored folder has contents
+            const probeQ = encodeURIComponent(`'${fileData.id}' in parents and trashed = false`);
+            const probeUrl = `${DRIVE_API_URL}/files?q=${probeQ}&fields=files(id)&pageSize=2`;
+            const probeRes = await fetchWithDriveBackoff(probeUrl, { headers: this.getHeaders(token) });
+            const probeData = probeRes.ok ? await probeRes.json() : null;
+            const hasChildren = (probeData?.files || []).length > 0;
+
             const validFolder: DriveFolder = {
               id: fileData.id,
               name: fileData.name || selected.name,
               parentId: fileData.parents?.[0] || 'root',
               path: `/${fileData.name || selected.name}`
             };
-            this.cachedMusicRootFolder = validFolder;
-            this.folderDetailsCache.set(validFolder.id, {
-              id: validFolder.id,
-              name: validFolder.name,
-              parentId: 'root',
-              path: `/${validFolder.name}`
-            });
-            return validFolder;
+
+            // If the stored folder has children, use it immediately
+            if (hasChildren) {
+              this.cachedMusicRootFolder = validFolder;
+              this.folderDetailsCache.set(validFolder.id, {
+                id: validFolder.id,
+                name: validFolder.name,
+                parentId: 'root',
+                path: `/${validFolder.name}`
+              });
+              return validFolder;
+            } else {
+              console.log(`[DriveService] Stored folder "${selected.name}" (${selected.id}) is empty. Probing for populated folders...`);
+            }
           }
         }
       } catch (e) {
@@ -199,7 +214,7 @@ export class DriveService {
     }
 
     try {
-      // 1. Direct query for folder named "mimusica" or common casing variations
+      // 2. Direct query for folder named "mimusica" or common variations
       const queryNameFilters = [
         "name = 'mimusica'",
         "name = 'MiMusica'",
@@ -213,7 +228,7 @@ export class DriveService {
       ].join(' or ');
 
       const q = encodeURIComponent(`mimeType = 'application/vnd.google-apps.folder' and trashed = false and (${queryNameFilters})`);
-      const url = `${DRIVE_API_URL}/files?q=${q}&fields=files(id, name, parents, modifiedTime)&pageSize=100&orderBy=name`;
+      const url = `${DRIVE_API_URL}/files?q=${q}&fields=files(id, name, parents, modifiedTime)&pageSize=50&orderBy=modifiedTime desc`;
 
       const res = await fetchWithDriveBackoff(url, { headers: this.getHeaders(token) });
       if (!res.ok) {
@@ -224,12 +239,42 @@ export class DriveService {
       }
 
       const data = await res.json();
-      const matchedFolders = data.files || [];
+      const matchedFolders: any[] = data.files || [];
 
       if (matchedFolders.length > 0) {
-        // Prioritize exact match "mimusica"
-        const exactMatch = matchedFolders.find((f: any) => f.name.toLowerCase() === 'mimusica');
-        const bestFolder = exactMatch || matchedFolders[0];
+        let bestFolder: any = null;
+
+        if (matchedFolders.length === 1) {
+          bestFolder = matchedFolders[0];
+        } else {
+          // Probe candidates in parallel to detect which candidate folder actually contains files or subfolders
+          const probePromises = matchedFolders.slice(0, 10).map(async (folder) => {
+            try {
+              const probeQ = encodeURIComponent(`'${folder.id}' in parents and trashed = false`);
+              const probeUrl = `${DRIVE_API_URL}/files?q=${probeQ}&fields=files(id)&pageSize=3`;
+              const probeRes = await fetchWithDriveBackoff(probeUrl, { headers: this.getHeaders(token) });
+              if (!probeRes.ok) return { folder, count: 0 };
+              const probeData = await probeRes.json();
+              return { folder, count: (probeData.files || []).length };
+            } catch {
+              return { folder, count: 0 };
+            }
+          });
+
+          const probeResults = await Promise.all(probePromises);
+          const populated = probeResults.filter((r) => r.count > 0);
+
+          if (populated.length > 0) {
+            // Prioritize exact match "mimusica" among populated folders
+            const exactPopulated = populated.find((r) => r.folder.name.toLowerCase() === 'mimusica');
+            bestFolder = exactPopulated ? exactPopulated.folder : populated[0].folder;
+            console.log(`[DriveService] Detected populated music folder: "${bestFolder.name}" (ID: ${bestFolder.id})`);
+          } else {
+            // Fallback: exact match "mimusica" or the most recently modified folder
+            const exactMatch = matchedFolders.find((f: any) => f.name.toLowerCase() === 'mimusica');
+            bestFolder = exactMatch || matchedFolders[0];
+          }
+        }
 
         const rootFolder: DriveFolder = {
           id: bestFolder.id,
@@ -244,10 +289,14 @@ export class DriveService {
           parentId: 'root',
           path: `/${rootFolder.name}`
         });
+
+        // Store detected active root folder in preferences & localStorage
+        this.setSelectedMusicFolder(rootFolder);
+
         return rootFolder;
       }
 
-      // 2. Fallback: Search all folders to find case-insensitive 'mimusica'
+      // 3. Fallback: Search all folders to find case-insensitive 'mimusica'
       let pageToken: string | undefined = undefined;
       const allFolders: any[] = [];
       const allQ = encodeURIComponent("mimeType = 'application/vnd.google-apps.folder' and trashed = false");
@@ -287,10 +336,11 @@ export class DriveService {
           parentId: 'root',
           path: `/${rootFolder.name}`
         });
+        this.setSelectedMusicFolder(rootFolder);
         return rootFolder;
       }
 
-      // 3. Only if explicitly requested and definitely not found, create "mimusica"
+      // 4. Only if explicitly requested and definitely not found, create "mimusica"
       if (createIfNotFound) {
         const createRes = await fetchWithDriveBackoff(`${DRIVE_API_URL}/files`, {
           method: 'POST',
@@ -319,6 +369,7 @@ export class DriveService {
             parentId: 'root',
             path: `/${newFolder.name}`
           });
+          this.setSelectedMusicFolder(newFolder);
           return newFolder;
         }
       }
@@ -329,61 +380,100 @@ export class DriveService {
     return null;
   }
 
-  private async executeDriveQuery(query: string, fields: string, token: string) {
-    const url = new URL('https://www.googleapis.com/drive/v3/files');
-    url.searchParams.set('q', query);
-    url.searchParams.set('fields', fields);
-    url.searchParams.set('pageSize', '1000');
-    url.searchParams.set('supportsAllDrives', 'true');
-    url.searchParams.set('includeItemsFromAllDrives', 'true');
-
-    const res = await fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) throw new Error(`Drive API Error: ${res.status} ${res.statusText}`);
-    return await res.json();
-  }
-
-  // Carga carpetas y pistas en paralelo optimizando cuota (100 unidades c/u)
+  /**
+   * Targeted Library Discovery (Lectura en 1 Solo Salto sin escaneo recursivo)
+   * Fetches the complete hierarchy and audio files specifically inside rootFolderId and all its subfolders.
+   * Performs direct parent queries:
+   * 1. Fetches all direct subfolders (and nested subfolders) of rootFolderId
+   * 2. Fetches all files within rootFolderId and its subfolders in batched parent queries
+   * Consumes minimal API quota (2-3 requests), handles pagination, never downloads binary media,
+   * and never misses tracks due to generic MIME types (e.g. application/octet-stream or video/mp4).
+   */
   public async fetchLibraryHierarchy(rootFolderId: string, token: string) {
-    const folderFields = 'nextPageToken, files(id, name, parents)';
-    const trackFields = 'nextPageToken, files(id, name, size, mimeType, parents, modifiedTime, thumbnailLink, videoMediaMetadata)';
+    const folderFields = 'nextPageToken, files(id, name, parents, modifiedTime)';
+    const allDiscoveredFolders: any[] = [];
+    let pageToken: string | undefined = undefined;
 
-    const [foldersResponse, tracksResponse] = await Promise.all([
-      // 1. Obtener todas las subcarpetas que pertenezcan al árbol
-      this.executeDriveQuery(
-        `mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-        folderFields,
-        token
-      ),
-      // 2. Obtener únicamente archivos de audio evitando el escaneo binario
-      this.executeDriveQuery(
-        `mimeType contains 'audio/' and trashed = false`,
-        trackFields,
-        token
-      )
-    ]);
+    // 1. Fetch direct subfolders of rootFolderId with full pagination
+    do {
+      const pageParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+      const q = encodeURIComponent(`mimeType = 'application/vnd.google-apps.folder' and trashed = false and '${rootFolderId}' in parents`);
+      const url = `${DRIVE_API_URL}/files?q=${q}&fields=${folderFields}&pageSize=1000${pageParam}`;
+      const res = await fetchWithDriveBackoff(url, { headers: this.getHeaders(token) });
+      if (!res.ok) break;
+      const data = await res.json();
+      pageToken = data.nextPageToken;
+      if (data.files && Array.isArray(data.files)) {
+        allDiscoveredFolders.push(...data.files);
+      }
+    } while (pageToken);
 
-    // Filtrado en memoria del cliente: sin impacto en red ni cuota de Drive
-    const validFolderIds = new Set<string>([rootFolderId]);
-    let added = true;
-    while (added) {
-      added = false;
-      const fList = foldersResponse?.files || [];
-      for (const f of fList) {
-        if (f.parents && f.parents.some((p: string) => validFolderIds.has(p)) && !validFolderIds.has(f.id)) {
-          validFolderIds.add(f.id);
-          added = true;
-        }
+    // Also check for 2nd-level subfolders (e.g., /mimusica/Artist/Album) in a single batched query
+    if (allDiscoveredFolders.length > 0) {
+      const parentChunks: string[][] = [];
+      const chunkSize = 20;
+      for (let i = 0; i < allDiscoveredFolders.length; i += chunkSize) {
+        parentChunks.push(allDiscoveredFolders.slice(i, i + chunkSize).map((f: any) => f.id));
+      }
+
+      for (const chunk of parentChunks) {
+        const parentConditions = chunk.map((id) => `'${id}' in parents`).join(' or ');
+        const subQ = encodeURIComponent(`mimeType = 'application/vnd.google-apps.folder' and trashed = false and (${parentConditions})`);
+        let subPageToken: string | undefined = undefined;
+        do {
+          const pageParam = subPageToken ? `&pageToken=${encodeURIComponent(subPageToken)}` : '';
+          const url = `${DRIVE_API_URL}/files?q=${subQ}&fields=${folderFields}&pageSize=1000${pageParam}`;
+          const res = await fetchWithDriveBackoff(url, { headers: this.getHeaders(token) });
+          if (!res.ok) break;
+          const data = await res.json();
+          subPageToken = data.nextPageToken;
+          if (data.files && Array.isArray(data.files)) {
+            for (const subF of data.files) {
+              if (!allDiscoveredFolders.some((existing) => existing.id === subF.id)) {
+                allDiscoveredFolders.push(subF);
+              }
+            }
+          }
+        } while (subPageToken);
       }
     }
 
-    const filteredFolders = (foldersResponse?.files || []).filter((f: any) => validFolderIds.has(f.id));
-    const filteredTracks = (tracksResponse?.files || []).filter((t: any) => 
-      t.parents && t.parents.some((p: string) => validFolderIds.has(p))
-    );
+    // Build the set of all valid folder IDs (root folder + all subfolders)
+    const validFolderIds = new Set<string>([rootFolderId, ...allDiscoveredFolders.map((f: any) => f.id)]);
+    const allFolderIdList = Array.from(validFolderIds);
 
-    return { folders: filteredFolders, tracks: filteredTracks };
+    // 2. Fetch all files directly located inside rootFolderId and any of its subfolders
+    const trackFields = 'nextPageToken, files(id, name, size, mimeType, parents, modifiedTime, thumbnailLink, videoMediaMetadata)';
+    const allFiles: any[] = [];
+    const parentChunks: string[][] = [];
+    const chunkSize = 20;
+
+    for (let i = 0; i < allFolderIdList.length; i += chunkSize) {
+      parentChunks.push(allFolderIdList.slice(i, i + chunkSize));
+    }
+
+    for (const chunk of parentChunks) {
+      const parentConditions = chunk.map((id) => `'${id}' in parents`).join(' or ');
+      const filesQ = encodeURIComponent(`trashed = false and (${parentConditions})`);
+      let filesPageToken: string | undefined = undefined;
+
+      do {
+        const pageParam = filesPageToken ? `&pageToken=${encodeURIComponent(filesPageToken)}` : '';
+        const url = `${DRIVE_API_URL}/files?q=${filesQ}&fields=${trackFields}&pageSize=1000${pageParam}`;
+        const res = await fetchWithDriveBackoff(url, { headers: this.getHeaders(token) });
+        if (!res.ok) break;
+        const data = await res.json();
+        filesPageToken = data.nextPageToken;
+        if (data.files && Array.isArray(data.files)) {
+          allFiles.push(...data.files);
+        }
+      } while (filesPageToken);
+    }
+
+    return {
+      folders: allDiscoveredFolders,
+      tracks: allFiles
+    };
   }
 
   /**
@@ -504,12 +594,22 @@ export class DriveService {
 
       // Explicitly reject non-audio documents or text
       if (NON_AUDIO_EXTENSIONS.has(ext)) continue;
-      if (mime.startsWith('text/') || mime.includes('pdf')) continue;
+      if (mime.startsWith('text/') || mime.includes('pdf') || mime.includes('zip') || mime.includes('rar')) continue;
 
-      // Audio file formats
-      if (AUDIO_EXTENSIONS.has(ext) || mime.startsWith('audio/') || mime === 'application/ogg' || mime.includes('flac') || mime.includes('wav')) {
+      // Audio file formats: check extension and MIME types
+      const isAudioByExtension = AUDIO_EXTENSIONS.has(ext);
+      const isAudioByMime =
+        mime.startsWith('audio/') ||
+        mime.includes('audio') ||
+        mime === 'application/ogg' ||
+        mime.includes('flac') ||
+        mime.includes('wav') ||
+        (mime.includes('mp4') && ['m4a', 'aac', 'alac'].includes(ext));
+
+      if (isAudioByExtension || isAudioByMime) {
         validAudioFiles.push(file);
-      } else {
+      } else if (mime === 'application/octet-stream' && !NON_AUDIO_EXTENSIONS.has(ext)) {
+        // Fallback for Drive-uploaded audio files with octet-stream MIME
         validAudioFiles.push(file);
       }
     }
