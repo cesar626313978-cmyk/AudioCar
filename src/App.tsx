@@ -1,393 +1,122 @@
 /**
- * Main Application Shell - AudioCar
- * Single-Page Architecture with In-Car Cockpit Player as Main View
- * Minimalist Icon-Only Header & Overlay Menu System with Bottom Save/Action Bars
+ * Main Application Shell - Spherical Earth Audio Player (Google Drive)
+ * Minimalist, ultra-clean single-view design modeled after the terrestrial sphere.
+ * All controls, playback, search, and Google Drive access are integrated within the circle.
  */
 
 import React, { useState, useEffect } from 'react';
 import { PlayerState, AudioTrack, DriveFolder, DriveAuthUser } from './types';
 import { audioEngine } from './services/audioEngine';
 import { authService } from './services/authService';
-import { cloudService } from './services/cloudService';
-import { dbService } from './services/dbService';
-import { preferencesService } from './services/preferencesService';
 import { driveService } from './services/driveService';
-
-// Components
-import { Header } from './components/Header';
-import { TeslaDashboardSimulator } from './components/TeslaDashboardSimulator';
-import { LibraryModal } from './components/LibraryModal';
-import { AuthModal } from './components/AuthModal';
-import { AudioSettingsModal } from './components/AudioSettingsModal';
-import { DonationModal } from './components/DonationModal';
-import { ContactModal } from './components/ContactModal';
-import { HelpModal } from './components/HelpModal';
-import { SyncNoticeModal, SyncNoticeType } from './components/SyncNoticeModal';
-
-export type ActiveOverlay = 'none' | 'library' | 'settings' | 'auth' | 'donation' | 'contact' | 'help';
+import { dbService } from './services/dbService';
+import { DEMO_TRACKS } from './data/demoTracks';
+import { SphericalPlayer } from './components/SphericalPlayer';
+import { SpaceBackground } from './components/SpaceBackground';
+import { UfoBanner } from './components/UfoBanner';
 
 export function App() {
   const [playerState, setPlayerState] = useState<PlayerState>(audioEngine.getState());
   const [user, setUser] = useState<DriveAuthUser | null>(authService.getUser());
   const [tracks, setTracks] = useState<AudioTrack[]>([]);
   const [folders, setFolders] = useState<DriveFolder[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [syncProgressPercent, setSyncProgressPercent] = useState<number>(0);
-  const [syncProgressStep, setSyncProgressStep] = useState<string>('');
-  const [activeOverlay, setActiveOverlay] = useState<ActiveOverlay>('none');
-  const [syncNotice, setSyncNotice] = useState<{
-    isOpen: boolean;
-    type: SyncNoticeType;
-    userEmail?: string;
-    rootFolderName?: string;
-    foldersCount?: number;
-    tracksCount?: number;
-    trackTitle?: string;
-  }>({
-    isOpen: false,
-    type: 'not_connected'
-  });
-  
-  // Theme state (Dark mode by default, persisted locally)
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    const saved = localStorage.getItem('audiocar_theme');
-    return (saved === 'light' || saved === 'dark') ? saved : 'dark';
-  });
+  const [isLoadingDrive, setIsLoadingDrive] = useState<boolean>(false);
 
-  const toggleTheme = () => {
-    setTheme((prev) => {
-      const next = prev === 'dark' ? 'light' : 'dark';
-      localStorage.setItem('audiocar_theme', next);
-      preferencesService.updateCurrentPreference('theme', next);
-      return next;
-    });
-  };
-
-  // Initialize and subscribe
+  // Initialize and subscribe to core services
   useEffect(() => {
-    // 1. Subscribe to Audio Engine state
+    // 1. Audio Engine playback state subscription
     const unsubscribeAudio = audioEngine.subscribe((state) => {
       setPlayerState(state);
     });
 
-    // 2. Subscribe to Cloud Provider changes
-    const unsubscribeCloud = cloudService.subscribe((provider) => {
-      const session = provider.getSession();
-      if (session) {
-        setUser({
-          email: session.email,
-          name: session.name,
-          picture: session.picture || '',
-          accessToken: session.accessToken,
-          expiresAt: session.expiresAt
-        });
-      } else {
-        setUser(null);
-      }
-    });
-
-    // 3. Subscribe to Auth changes and apply User Preferences
+    // 2. Auth service state subscription
     const unsubscribeAuth = authService.subscribe(async (authUser) => {
-      const activeEmail = authUser?.email || 'default';
-      
-      // Load and apply this specific user's saved preferences profile
-      try {
-        const userPrefs = await preferencesService.loadPreferencesForUser(activeEmail);
-        audioEngine.applyPreferencesProfile(userPrefs);
-        if (userPrefs.theme && (userPrefs.theme === 'dark' || userPrefs.theme === 'light')) {
-          setTheme(userPrefs.theme);
-          localStorage.setItem('audiocar_theme', userPrefs.theme);
-        }
-      } catch (e) {
-        console.warn('Could not apply user preferences on auth change:', e);
-      }
-
-      if (authUser && cloudService.getActiveProviderId() === 'drive') {
-        setUser(authUser);
-        syncCloudContent();
-      } else if (!authUser) {
-        setUser(null);
-        audioEngine.stop();
-        audioEngine.purgeMemoryBuffers();
+      setUser(authUser);
+      if (authUser) {
+        // Auto-refresh tracks when logged in
+        refreshDriveTracks();
       }
     });
 
-    // 4. Subscribe to live preference changes (local updates & cloud sync merges)
-    const unsubscribePrefs = preferencesService.subscribe((prefs) => {
-      audioEngine.applyPreferencesProfile(prefs);
-      if (prefs.theme && (prefs.theme === 'dark' || prefs.theme === 'light')) {
-        setTheme(prefs.theme);
-      }
-    });
+    // 3. Load initial local cache / demo tracks
+    loadInitialMusic();
 
-    // 5. Subscribe to Drive Auth Required events (triggered when user tries to play or access Drive content while disconnected)
-    const unsubscribeAuthRequired = audioEngine.onAuthRequired((provider, track) => {
-      setSyncNotice({
-        isOpen: true,
-        type: 'not_connected',
-        trackTitle: track?.title || track?.name
-      });
-    });
-
-    // 6. Load initial local data & queue
-    loadInitialData();
-
-    // 7. Init Google Token client
+    // 4. Initialize Google Identity Services token client
     authService.initTokenClient();
 
     return () => {
       unsubscribeAudio();
-      unsubscribeCloud();
       unsubscribeAuth();
-      unsubscribePrefs();
-      unsubscribeAuthRequired();
     };
   }, []);
 
-  const loadInitialData = async () => {
+  const loadInitialMusic = async () => {
     try {
-      const cachedTracks = await dbService.getAllTracks();
-      const cachedFolders = await dbService.getAllFolders();
-
-      setTracks(cachedTracks);
-      setFolders(cachedFolders);
-      audioEngine.setAllAvailableTracks(cachedTracks);
-
-      // Set initial audio queue if empty and cached tracks exist
-      if (audioEngine.getState().queue.length === 0 && cachedTracks.length > 0) {
-        audioEngine.setQueue(cachedTracks, 0, false);
+      const cached = await dbService.getAllTracks();
+      if (cached && cached.length > 0) {
+        setTracks(cached);
+        if (audioEngine.getState().queue.length === 0) {
+          audioEngine.setQueue(cached, 0, false);
+        }
+      } else {
+        // Default to high-fidelity demo tracks for instant experience
+        setTracks(DEMO_TRACKS);
+        if (audioEngine.getState().queue.length === 0) {
+          audioEngine.setQueue(DEMO_TRACKS, 0, false);
+        }
       }
     } catch (e) {
-      console.warn('Initial data load warning:', e);
+      console.warn('Error loading initial music cache:', e);
+      setTracks(DEMO_TRACKS);
+      if (audioEngine.getState().queue.length === 0) {
+        audioEngine.setQueue(DEMO_TRACKS, 0, false);
+      }
     }
   };
 
-  const syncCloudContent = async (isManual: boolean = false) => {
-    setIsLoading(true);
-    setIsSyncing(true);
-    setSyncProgressPercent(10);
-    setSyncProgressStep('Conectando con Google Drive...');
+  const refreshDriveTracks = async () => {
+    if (!authService.getAccessToken()) return;
     try {
-      // Stream partial tracks and folders into player state as soon as discovered
-      const handlePartialStream = async (partialTracks: AudioTrack[], partialFolders?: DriveFolder[]) => {
-        if (partialTracks.length > 0) {
-          setTracks(partialTracks);
-          audioEngine.setAllAvailableTracks(partialTracks);
-
-          // Update player queue if empty so user can press play right away!
-          const currentTrack = audioEngine.getCurrentTrack();
-          if (!currentTrack) {
-            audioEngine.setQueue(partialTracks, 0, false);
-          }
-        }
-
-        if (partialFolders && partialFolders.length > 0) {
-          setFolders(partialFolders);
-        }
-
-        // UNLOCK the library and player immediately so user can use the app without waiting!
-        setIsLoading(false);
-      };
-
-      const syncResult = await cloudService.syncLibraryDetailed(
-        undefined,
-        (progress) => {
-          setSyncProgressPercent(progress.percent);
-          setSyncProgressStep(progress.step);
-        },
-        handlePartialStream
-      );
-
-      if (isManual) {
-        if (syncResult.status === 'not_authenticated') {
-          setSyncNotice({
-            isOpen: true,
-            type: 'not_connected'
-          });
-          return;
-        }
-
-        if (syncResult.status === 'root_folder_not_found') {
-          setSyncNotice({
-            isOpen: true,
-            type: 'mimusica_not_found',
-            userEmail: syncResult.userEmail
-          });
-          return;
-        }
-
-        if (syncResult.status === 'synced') {
-          setSyncNotice({
-            isOpen: true,
-            type: 'sync_success',
-            userEmail: syncResult.userEmail,
-            rootFolderName: syncResult.rootFolderName,
-            foldersCount: syncResult.foldersCount,
-            tracksCount: syncResult.tracksCount
-          });
-        }
+      setIsLoadingDrive(true);
+      let driveTracks = await driveService.listAudioFiles();
+      if (!driveTracks || driveTracks.length === 0) {
+        driveTracks = await driveService.scanAllDriveAudioFiles();
       }
-
-      const cloudTracks = syncResult.tracks || [];
-      const cloudFolders = syncResult.folders || [];
-
-      setTracks(cloudTracks);
-      setFolders(cloudFolders);
-      audioEngine.setAllAvailableTracks(cloudTracks);
-
-      // Update player queue if empty
-      const currentTrack = audioEngine.getCurrentTrack();
-      if (!currentTrack && cloudTracks.length > 0) {
-        audioEngine.setQueue(cloudTracks, 0, false);
+      if (driveTracks && driveTracks.length > 0) {
+        setTracks(driveTracks);
+        audioEngine.setQueue(driveTracks, 0, false);
       }
     } catch (err) {
-      console.warn('Error syncing cloud content:', err);
+      console.warn('Could not auto-refresh drive tracks:', err);
     } finally {
-      setIsLoading(false);
-      setIsSyncing(false);
-      setTimeout(() => {
-        setSyncProgressPercent(0);
-        setSyncProgressStep('');
-      }, 1500);
-    }
-  };
-
-  const handleDeleteSingleTrack = async (trackId: string) => {
-    await dbService.deleteTrack(trackId);
-    const remaining = tracks.filter((t) => t.id !== trackId);
-    setTracks(remaining);
-    audioEngine.setAllAvailableTracks(remaining);
-    const currentQueue = audioEngine.getState().queue;
-    const filteredQueue = currentQueue.filter((t) => t.id !== trackId);
-    if (filteredQueue.length !== currentQueue.length) {
-      audioEngine.setQueue(filteredQueue, 0, false);
+      setIsLoadingDrive(false);
     }
   };
 
   return (
-    <div className={`w-screen h-screen overflow-hidden ${theme === 'light' ? 'theme-light bg-[#f1f3f6] text-[#0f172a]' : 'theme-dark bg-black text-white'} flex flex-col antialiased selection:bg-[#E82127] selection:text-white`}>
-      {/* 1. TOP HEADER: Skeuomorphic luxury top bar with 7 gold-bezel icons */}
-      <Header
-        user={user}
-        activeOverlay={activeOverlay}
-        isPlaying={playerState.isPlaying}
-        isSyncing={isSyncing}
-        syncPercent={syncProgressPercent}
-        syncStep={syncProgressStep}
-        onOpenPlayer={() => setActiveOverlay('none')}
-        onOpenLibrary={() => setActiveOverlay('library')}
-        onOpenSettings={() => setActiveOverlay('settings')}
-        onOpenAuth={() => setActiveOverlay('auth')}
-        onOpenDonation={() => setActiveOverlay('donation')}
-        onOpenContact={() => setActiveOverlay('contact')}
-        onOpenHelp={() => setActiveOverlay('help')}
-        theme={theme}
-        toggleTheme={toggleTheme}
-      />
+    <div 
+      id="app-root"
+      className="relative w-screen h-screen overflow-hidden bg-[#03060d] text-white flex flex-col items-center justify-center select-none antialiased"
+    >
+      {/* Living Space Background with Drifting Stars, Distant Planets, Comets & Cosmic Clouds */}
+      <SpaceBackground />
 
-      {/* 2. MAIN VIEW: Single-Page In-Car Cockpit Player */}
-      <main className="flex-1 w-full h-full overflow-hidden flex flex-col relative">
-        <TeslaDashboardSimulator
+      {/* Retro Sci-Fi UFO flying banner passing by occasionally */}
+      <UfoBanner />
+
+      {/* Pure Central Focus: The Terrestrial Spherical Player with Eclipse Neon Corona */}
+      <main className="relative z-10 flex flex-col items-center justify-center w-full h-full p-4 pointer-events-none">
+        <SphericalPlayer
           playerState={playerState}
-          onExitTeslaMode={() => setActiveOverlay('library')}
-          onOpenSettings={() => setActiveOverlay('settings')}
-        />
-      </main>
-
-      {/* 3. OVERLAY MENUS (Rendered directly over the player with Save & Close bottom bar) */}
-      {activeOverlay === 'library' && (
-        <LibraryModal
+          user={user}
           tracks={tracks}
           folders={folders}
-          currentTrackId={audioEngine.getCurrentTrack()?.id}
-          onRefreshDrive={() => syncCloudContent(true)}
-          isLoading={isLoading}
-          isSyncing={isSyncing}
-          syncPercent={syncProgressPercent}
-          syncStep={syncProgressStep}
-          onDeleteTrack={handleDeleteSingleTrack}
-          onClose={() => setActiveOverlay('none')}
+          onTracksChange={(newTracks) => setTracks(newTracks)}
+          onFoldersChange={(newFolders) => setFolders(newFolders)}
+          isLoadingDrive={isLoadingDrive}
+          setIsLoadingDrive={setIsLoadingDrive}
         />
-      )}
-
-      {activeOverlay === 'settings' && (
-        <AudioSettingsModal
-          playerState={playerState}
-          onClose={() => setActiveOverlay('none')}
-          allTracks={tracks}
-          onOpenDonation={() => setActiveOverlay('donation')}
-          onOpenContact={() => setActiveOverlay('contact')}
-          onOpenHelp={() => setActiveOverlay('help')}
-        />
-      )}
-
-      {activeOverlay === 'auth' && (
-        <AuthModal
-          onClose={() => setActiveOverlay('none')}
-          onSuccess={() => {
-            syncCloudContent(true);
-          }}
-        />
-      )}
-
-      {activeOverlay === 'donation' && (
-        <DonationModal
-          onClose={() => setActiveOverlay('none')}
-        />
-      )}
-
-      {activeOverlay === 'contact' && (
-        <ContactModal
-          onClose={() => setActiveOverlay('none')}
-          user={user}
-          playerState={playerState}
-        />
-      )}
-
-      {activeOverlay === 'help' && (
-        <HelpModal
-          onClose={() => setActiveOverlay('none')}
-          onOpenCloud={() => setActiveOverlay('auth')}
-          onOpenLibrary={() => setActiveOverlay('library')}
-          onOpenSettings={() => setActiveOverlay('settings')}
-        />
-      )}
-
-      {/* 4. SYNC STATUS & ALERT MODAL */}
-      {syncNotice.isOpen && (
-        <SyncNoticeModal
-          type={syncNotice.type}
-          userEmail={syncNotice.userEmail}
-          rootFolderName={syncNotice.rootFolderName}
-          foldersCount={syncNotice.foldersCount}
-          tracksCount={syncNotice.tracksCount}
-          trackTitle={syncNotice.trackTitle}
-          onClose={() => setSyncNotice((prev) => ({ ...prev, isOpen: false }))}
-          onConnectSuccess={() => {
-            syncCloudContent(true);
-            audioEngine.play();
-          }}
-          onFolderCreated={() => syncCloudContent(true)}
-          onPickFolder={async () => {
-            const folder = await driveService.promptPickMusicFolder();
-            if (folder) {
-              await syncCloudContent(true);
-            }
-          }}
-          onReauthorize={async () => {
-            try {
-              setIsLoading(true);
-              await authService.requestSignIn({ forceConsent: true });
-              await syncCloudContent(true);
-            } catch (err) {
-              console.error('Re-auth error:', err);
-            } finally {
-              setIsLoading(false);
-            }
-          }}
-        />
-      )}
+      </main>
     </div>
   );
 }

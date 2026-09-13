@@ -14,6 +14,8 @@ interface LibraryModalProps {
   isSyncing?: boolean;
   syncPercent?: number;
   syncStep?: string;
+  onDeleteDemoTracks?: () => void;
+  onRestoreDemoTracks?: () => void;
   onDeleteTrack?: (trackId: string) => void;
   onClose: () => void;
 }
@@ -27,6 +29,8 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
   isSyncing = false,
   syncPercent = 0,
   syncStep = '',
+  onDeleteDemoTracks,
+  onRestoreDemoTracks,
   onDeleteTrack,
   onClose
 }) => {
@@ -167,6 +171,8 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
               setSelectedFolderId(folderId);
               setSubView('folders');
             }}
+            onDeleteDemoTracks={onDeleteDemoTracks}
+            onRestoreDemoTracks={onRestoreDemoTracks}
             onDeleteTrack={onDeleteTrack}
             initialTab="folders"
           />

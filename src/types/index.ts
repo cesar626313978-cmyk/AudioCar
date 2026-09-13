@@ -3,7 +3,7 @@
  */
 
 export type ImageFormat = 'JPG' | 'PNG' | 'GIF' | 'WEBP' | 'SVG' | 'OTHER';
-export type CloudProviderType = 'drive';
+export type CloudProviderType = 'drive' | 'demo';
 
 export interface AudioTrack {
   id: string;
@@ -22,7 +22,7 @@ export interface AudioTrack {
   cloudPath?: string;
   folderId?: string;
   folderPath?: string;
-  source: 'drive' | 'local';
+  source: 'drive' | 'demo' | 'local';
   bitrate?: string;
   year?: string;
   cachedBlobUrl?: string;
@@ -143,8 +143,7 @@ export interface UserPreferences {
   normalizationPreset: 'balanced' | 'dynamic' | 'night';
   bufferAheadCount: number;
   theme: 'dark' | 'light';
-  selectedFolderId?: string;
-  selectedFolderName?: string;
+  hideDemoTracks: boolean;
   ledColor?: string;
   isLedPulseActive?: boolean;
   lastUpdated: number;

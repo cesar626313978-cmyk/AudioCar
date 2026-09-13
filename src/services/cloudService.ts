@@ -1,11 +1,12 @@
 /**
  * Unified Cloud Service Manager - AudioCar
- * Dedicated to Google Drive cloud audio.
+ * Dedicated to Google Drive (and local / demo mode).
  * Direct audio routing, folder traversal, session persistence and synchronization.
  */
 
 import { AudioTrack, DriveFolder, CloudMusicProvider, CloudProviderType, CloudUserSession } from '../types';
 import { googleDriveProvider } from './providers/GoogleDriveProvider';
+import { demoProvider } from './providers/DemoProvider';
 import { dbService } from './dbService';
 import { driveService } from './driveService';
 import { authService } from './authService';
@@ -34,50 +35,61 @@ class CloudService {
 
   constructor() {
     this.providers.set('drive', googleDriveProvider);
+    this.providers.set('demo', demoProvider);
+
     this.loadActiveProvider();
   }
 
   private loadActiveProvider() {
-    this.activeProviderId = 'drive';
+    try {
+      const saved = localStorage.getItem(ACTIVE_PROVIDER_KEY) as CloudProviderType | null;
+      if (saved && this.providers.has(saved)) {
+        this.activeProviderId = saved;
+      } else {
+        this.activeProviderId = 'drive';
+      }
+    } catch {
+      this.activeProviderId = 'drive';
+    }
   }
 
   public getActiveProviderId(): CloudProviderType {
-    return 'drive';
+    return this.activeProviderId;
   }
 
   public getActiveProvider(): CloudMusicProvider {
-    return googleDriveProvider;
+    return this.providers.get(this.activeProviderId) || googleDriveProvider;
   }
 
   public getProvider(id: CloudProviderType): CloudMusicProvider {
-    return googleDriveProvider;
+    return this.providers.get(id) || googleDriveProvider;
   }
 
   public setActiveProvider(id: CloudProviderType) {
-    this.activeProviderId = 'drive';
-    localStorage.setItem(ACTIVE_PROVIDER_KEY, 'drive');
+    if (!this.providers.has(id)) return;
+    this.activeProviderId = id;
+    localStorage.setItem(ACTIVE_PROVIDER_KEY, id);
     this.notifyListeners();
   }
 
   public getAllSessions(): Record<CloudProviderType, CloudUserSession | null> {
     return {
-      drive: googleDriveProvider.getSession()
+      drive: googleDriveProvider.getSession(),
+      demo: demoProvider.getSession()
     };
   }
 
   public async syncLibrary(
     targetProviderId?: CloudProviderType,
-    onProgress?: (progress: { percent: number; step: string }) => void,
-    onPartialTracks?: (tracks: AudioTrack[], folders?: DriveFolder[]) => void
+    onProgress?: (progress: { percent: number; step: string }) => void
   ): Promise<{ tracks: AudioTrack[]; folders: DriveFolder[] }> {
-    const res = await this.syncLibraryDetailed(targetProviderId, onProgress, onPartialTracks);
+    const res = await this.syncLibraryDetailed(targetProviderId, onProgress);
     return { tracks: res.tracks, folders: res.folders };
   }
 
   public async syncLibraryDetailed(
     targetProviderId?: CloudProviderType,
-    onProgress?: (progress: { percent: number; step: string }) => void,
-    onPartialTracks?: (tracks: AudioTrack[], folders?: DriveFolder[]) => void
+    onProgress?: (progress: { percent: number; step: string }) => void
   ): Promise<CloudSyncResult> {
     const provider = targetProviderId ? this.getProvider(targetProviderId) : this.getActiveProvider();
     
@@ -99,7 +111,7 @@ class CloudService {
 
       // Check if root folder "/mimusica" exists
       onProgress?.({ percent: 20, step: 'Localizando carpeta /mimusica en Google Drive...' });
-      const rootFolder = await driveService.getMusicRootFolder(false, true);
+      const rootFolder = await driveService.getMusicRootFolder(false);
       if (!rootFolder) {
         return {
           status: 'root_folder_not_found',
@@ -116,36 +128,15 @@ class CloudService {
       try {
         onProgress?.({ percent: 35, step: 'Explorando estructura de carpetas...' });
         const folders = await provider.listFolders();
-        if (folders.length > 0) {
-          await dbService.saveFolders(folders).catch(() => {});
-          // Notify folders discovered
-          onPartialTracks?.([], folders);
-        }
 
-        onProgress?.({ percent: 45, step: `Descubriendo canciones en la biblioteca...` });
-        const tracks = await (provider as any).listTracks(
-          undefined,
-          onProgress,
-          (partialTracks: AudioTrack[]) => {
-            onPartialTracks?.(partialTracks, folders);
-          }
-        );
+        onProgress?.({ percent: 45, step: `Descubriendo canciones en ${folders.length} carpetas...` });
+        const tracks = await (provider as any).listTracks(undefined, onProgress);
 
         if (tracks.length > 0) {
           await dbService.saveTracks(tracks).catch(() => {});
         }
-
-        // Retrieve active root folder (in case auto-redirect detected music in another folder)
-        const currentRoot = (await driveService.getMusicRootFolder(false)) || rootFolder;
-
-        // Retrieve all discovered folders from database
-        const allDbFolders = await dbService.getAllFolders().catch(() => []);
-        // Subfolders count: exclude the root folder itself if present
-        const nonRootFolders = allDbFolders.filter((f) => f.id !== currentRoot.id);
-        const finalFolders = nonRootFolders.length > 0 ? nonRootFolders : folders;
-
-        if (finalFolders.length > 0) {
-          await dbService.saveFolders(finalFolders).catch(() => {});
+        if (folders.length > 0) {
+          await dbService.saveFolders(folders).catch(() => {});
         }
 
         onProgress?.({ percent: 100, step: `¡Sincronización completada! ${tracks.length} canciones listas.` });
@@ -154,12 +145,12 @@ class CloudService {
           status: 'synced',
           success: true,
           rootFolderFound: true,
-          rootFolderName: currentRoot.name,
+          rootFolderName: rootFolder.name,
           userEmail: user.email,
           tracksCount: tracks.length,
-          foldersCount: finalFolders.length,
+          foldersCount: folders.length,
           tracks,
-          folders: finalFolders
+          folders
         };
       } catch (err: any) {
         return {
@@ -176,15 +167,29 @@ class CloudService {
       }
     }
 
+    // Fallback for demo or other providers
+    onProgress?.({ percent: 50, step: 'Cargando biblioteca demo...' });
+    const [tracks, folders] = await Promise.all([
+      provider.listTracks(),
+      provider.listFolders()
+    ]);
+    onProgress?.({ percent: 100, step: 'Biblioteca demo lista.' });
+
+    if (tracks.length > 0) {
+      await dbService.saveTracks(tracks).catch(() => {});
+    }
+    if (folders.length > 0) {
+      await dbService.saveFolders(folders).catch(() => {});
+    }
+
     return {
-      status: 'error',
-      success: false,
-      rootFolderFound: false,
-      tracksCount: 0,
-      foldersCount: 0,
-      tracks: [],
-      folders: [],
-      errorMessage: 'No hay proveedor de audio disponible.'
+      status: 'synced',
+      success: true,
+      rootFolderFound: true,
+      tracksCount: tracks.length,
+      foldersCount: folders.length,
+      tracks,
+      folders
     };
   }
 
@@ -200,6 +205,8 @@ class CloudService {
     switch (track.source) {
       case 'drive':
         return await googleDriveProvider.getStreamUrl(track);
+      case 'demo':
+        return await demoProvider.getStreamUrl(track);
       case 'local':
       default:
         return track.streamUrl || '';

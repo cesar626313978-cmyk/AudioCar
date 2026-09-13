@@ -2,12 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { cloudService } from '../services/cloudService';
 import { googleDriveProvider } from '../services/providers/GoogleDriveProvider';
 import { driveService } from '../services/driveService';
-import { audioEngine } from '../services/audioEngine';
 import { CloudProviderType, CloudUserSession } from '../types';
 import { 
   X, 
   Cloud, 
   Check, 
+  Sparkles, 
   FolderOpen, 
   AlertCircle, 
   RotateCw, 
@@ -138,11 +138,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onSuccess }) => {
     }
   };
 
+  const handleSelectDemo = async () => {
+    cloudService.setActiveProvider('demo');
+    setActiveProviderId('demo');
+    onSuccess();
+  };
+
   const handleDisconnect = async () => {
     setLoadingProvider('drive');
     try {
-      audioEngine.stop();
-      audioEngine.purgeMemoryBuffers();
       await cloudService.logoutProvider('drive');
       refreshSessions();
       onSuccess();
@@ -389,6 +393,50 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onSuccess }) => {
                   </button>
                 </div>
               )}
+            </div>
+
+            {/* Quick Demo Mode fallback banner */}
+            <div className={`p-4 rounded-2xl border transition-all overflow-hidden ${
+              activeProviderId === 'demo'
+                ? 'bg-neutral-900 border-amber-400/40 ring-1 ring-amber-400/20 shadow-lg'
+                : 'bg-[#111111] border-neutral-800 hover:border-neutral-700'
+            }`}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0 text-amber-400">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-sm text-white">Modo Demo Local</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0">
+                        Offline
+                      </span>
+                    </div>
+                    <p className="text-xs text-neutral-400 truncate mt-0.5">
+                      6 canciones de prueba para probar ecualizador y visualizadores
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleSelectDemo}
+                  className={`hitbox-48 h-9 px-4 rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer shrink-0 ${
+                    activeProviderId === 'demo'
+                      ? 'bg-amber-400 text-black font-extrabold shadow-sm'
+                      : 'bg-neutral-800 hover:bg-neutral-700 text-white'
+                  }`}
+                >
+                  {activeProviderId === 'demo' ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-black" />
+                      <span>Activo</span>
+                    </>
+                  ) : (
+                    <span>Probar</span>
+                  )}
+                </button>
+              </div>
             </div>
 
           </div>

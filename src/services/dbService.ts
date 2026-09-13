@@ -95,12 +95,7 @@ class IndexedDBService {
       const tx = db.transaction('tracks', 'readonly');
       const store = tx.objectStore('tracks');
       const request = store.getAll();
-      request.onsuccess = () => {
-        const tracks: AudioTrack[] = (request.result || []).filter(
-          (t: any) => t.source !== 'demo' && !t.id?.startsWith('demo_')
-        );
-        resolve(tracks);
-      };
+      request.onsuccess = () => resolve(request.result || []);
       request.onerror = () => reject(request.error);
     });
   }
@@ -167,38 +162,30 @@ class IndexedDBService {
 
   async deleteDemoTracks(): Promise<void> {
     const db = await this.getDB();
-    return new Promise((resolve) => {
-      try {
-        const tx = db.transaction(['tracks', 'folders'], 'readwrite');
-        const trackStore = tx.objectStore('tracks');
-        const folderStore = tx.objectStore('folders');
-
-        const trackReq = trackStore.getAll();
-        trackReq.onsuccess = () => {
-          const allTracks = trackReq.result || [];
-          allTracks.forEach((t: any) => {
-            if (t.source === 'demo' || t.id?.startsWith('demo_')) {
-              trackStore.delete(t.id);
-            }
-          });
-        };
-
-        const folderReq = folderStore.getAll();
-        folderReq.onsuccess = () => {
-          const allFolders = folderReq.result || [];
-          allFolders.forEach((f: any) => {
-            if (f.id?.startsWith('demo_')) {
-              folderStore.delete(f.id);
-            }
-          });
-        };
-
+    await this.setSetting('hideDemoTracks', true);
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('tracks', 'readwrite');
+      const store = tx.objectStore('tracks');
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const allTracks: AudioTrack[] = request.result || [];
+        allTracks.forEach((t) => {
+          if (t.source === 'demo' || t.id.startsWith('demo_')) {
+            store.delete(t.id);
+          }
+        });
         tx.oncomplete = () => resolve();
-        tx.onerror = () => resolve();
-      } catch {
-        resolve();
-      }
+      };
+      request.onerror = () => reject(request.error);
     });
+  }
+
+  async isDemoTracksHidden(): Promise<boolean> {
+    return this.getSetting<boolean>('hideDemoTracks', false);
+  }
+
+  async setDemoTracksHidden(hidden: boolean): Promise<void> {
+    return this.setSetting('hideDemoTracks', hidden);
   }
 
   // --- Folders operations ---
@@ -219,12 +206,7 @@ class IndexedDBService {
       const tx = db.transaction('folders', 'readonly');
       const store = tx.objectStore('folders');
       const request = store.getAll();
-      request.onsuccess = () => {
-        const folders: DriveFolder[] = (request.result || []).filter(
-          (f: any) => !f.id?.startsWith('demo_')
-        );
-        resolve(folders);
-      };
+      request.onsuccess = () => resolve(request.result || []);
       request.onerror = () => reject(request.error);
     });
   }

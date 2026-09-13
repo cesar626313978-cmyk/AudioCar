@@ -25,15 +25,14 @@ declare global {
 
 const AUTH_STORAGE_KEY = 'tesladrive_auth_session';
 const CLIENT_ID_KEY = 'tesladrive_custom_client_id';
-const SCOPES_VERSION_KEY = 'audiocar_scopes_ver';
-const CURRENT_SCOPES_VERSION = 'v3_readonly';
 
 // Primary provisioned client ID with authorized domain origins (audio-car.es, www.audio-car.es)
 const DEFAULT_CLIENT_ID =
   ((import.meta as any).env?.VITE_GOOGLE_CLIENT_ID as string) ||
   '463075236141-sspqgvtjaaakh5gna6alvdahhjl827od.apps.googleusercontent.com';
 
-// Scopes: drive.readonly grants full read access to user-uploaded music files in Drive
+// Scopes adhere strictly to the Principle of Least Privilege:
+// drive.readonly + drive.file allows read-only music streaming without any destructive access
 const SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/drive.file',
@@ -218,13 +217,12 @@ class AuthService {
    *    prompt the user to choose which Gmail/Google account they want to use.
    * 2. Falls back to Firebase Auth with explicit prompt: 'select_account'.
    */
-  public async requestSignIn(options?: { forceConsent?: boolean }): Promise<DriveAuthUser> {
+  public async requestSignIn(): Promise<DriveAuthUser> {
     if (this.isSigningIn) {
       throw new Error('Ya hay un proceso de inicio de sesión en curso.');
     }
 
     this.isSigningIn = true;
-    const promptValue = options?.forceConsent ? 'consent select_account' : 'select_account';
 
     try {
       // 1. Prioritize Google Identity Services (GIS) Token Client
@@ -236,7 +234,8 @@ class AuthService {
           const initialized = this.initTokenClient();
           if (initialized && this.tokenClient) {
             try {
-              this.tokenClient.requestAccessToken({ prompt: promptValue });
+              // 'select_account' forces Google to show the account picker every time
+              this.tokenClient.requestAccessToken({ prompt: 'select_account' });
               return;
             } catch (gisErr) {
               console.warn('GIS requestAccessToken error, trying Firebase...', gisErr);
@@ -244,7 +243,7 @@ class AuthService {
           }
 
           // Fallback to Firebase if GIS fails to start
-          this.signInWithFirebaseAuth(promptValue)
+          this.signInWithFirebaseAuth()
             .then((user) => {
               this.pendingAuthResolve = null;
               this.pendingAuthReject = null;
@@ -258,21 +257,21 @@ class AuthService {
         });
       }
 
-      // 2. Fallback to Firebase Auth popup with prompt
-      return await this.signInWithFirebaseAuth(promptValue);
+      // 2. Fallback to Firebase Auth popup with prompt: 'select_account'
+      return await this.signInWithFirebaseAuth();
     } finally {
       this.isSigningIn = false;
     }
   }
 
   /**
-   * Firebase Auth sign-in with Google Provider
+   * Firebase Auth sign-in with Google Provider and explicit prompt: 'select_account'
    */
-  private async signInWithFirebaseAuth(promptValue: string = 'select_account'): Promise<DriveAuthUser> {
+  private async signInWithFirebaseAuth(): Promise<DriveAuthUser> {
     const provider = new GoogleAuthProvider();
     SCOPES.forEach((scope) => provider.addScope(scope));
     provider.setCustomParameters({
-      prompt: promptValue
+      prompt: 'select_account'
     });
 
     const result = await signInWithPopup(auth, provider);
@@ -293,13 +292,8 @@ class AuthService {
 
     this.currentUser = user;
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
-    localStorage.setItem(SCOPES_VERSION_KEY, CURRENT_SCOPES_VERSION);
     this.notifyListeners();
     return user;
-  }
-
-  public hasUpdatedScopes(): boolean {
-    return localStorage.getItem(SCOPES_VERSION_KEY) === CURRENT_SCOPES_VERSION;
   }
 
   public initTokenClient(callback?: (user: DriveAuthUser) => void): boolean {
@@ -341,7 +335,6 @@ class AuthService {
 
             this.currentUser = user;
             localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
-            localStorage.setItem(SCOPES_VERSION_KEY, CURRENT_SCOPES_VERSION);
             this.notifyListeners();
 
             if (this.pendingAuthResolve) {
@@ -418,10 +411,6 @@ class AuthService {
     localStorage.removeItem(AUTH_STORAGE_KEY);
     swService.clearToken();
     this.notifyListeners();
-  }
-
-  public async logout(): Promise<void> {
-    return this.signOut();
   }
 
   public getUser(): DriveAuthUser | null {
