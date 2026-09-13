@@ -78,16 +78,13 @@ export function App() {
     if (!authService.getAccessToken()) return;
     try {
       setIsLoadingDrive(true);
-      let driveTracks = await driveService.listAudioFiles();
-      if (!driveTracks || driveTracks.length === 0) {
-        driveTracks = await driveService.scanAllDriveAudioFiles();
-      }
-      if (driveTracks && driveTracks.length > 0) {
-        setTracks(driveTracks);
-        audioEngine.setQueue(driveTracks, 0, false);
+      const structure = await driveService.getMimusicaStructure(false);
+      if (structure.exists && structure.allTracks.length > 0) {
+        setTracks(structure.allTracks);
+        audioEngine.setQueue(structure.allTracks, 0, false);
       }
     } catch (err) {
-      console.warn('Could not auto-refresh drive tracks:', err);
+      console.warn('Could not auto-refresh /mimusica tracks:', err);
     } finally {
       setIsLoadingDrive(false);
     }

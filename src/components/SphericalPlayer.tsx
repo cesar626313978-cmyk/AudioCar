@@ -22,12 +22,15 @@ import {
   Sparkles,
   Globe,
   Plus,
-  Minus
+  Minus,
+  ChevronRight,
+  AlertCircle,
+  FolderOpen
 } from 'lucide-react';
 import { PlayerState, AudioTrack, DriveFolder, DriveAuthUser } from '../types';
 import { audioEngine } from '../services/audioEngine';
 import { authService } from '../services/authService';
-import { driveService } from '../services/driveService';
+import { driveService, MimusicaStructure } from '../services/driveService';
 import { DEMO_TRACKS } from '../data/demoTracks';
 import { EclipseNeonBorder } from './EclipseNeonBorder';
 
@@ -52,8 +55,14 @@ export function SphericalPlayer({
   isLoadingDrive,
   setIsLoadingDrive,
 }: SphericalPlayerProps) {
-  // View mode inside the sphere: 'player' | 'playlist' | 'drive_menu'
-  const [innerView, setInnerView] = useState<'player' | 'playlist' | 'drive_menu'>('player');
+  // View mode inside the sphere: 'player' | 'playlist' | 'drive_menu' | 'mimusica_selector'
+  const [innerView, setInnerView] = useState<'player' | 'playlist' | 'drive_menu' | 'mimusica_selector'>('player');
+  const [mimusicaStructure, setMimusicaStructure] = useState<MimusicaStructure | null>(null);
+  const [mimusicaNotFound, setMimusicaNotFound] = useState(false);
+  const [activeFolderMode, setActiveFolderMode] = useState<{ type: 'all' | 'subfolder'; name: string; folderId?: string }>({
+    type: 'all',
+    name: 'Toda /mimusica'
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubTime, setScrubTime] = useState<number | null>(null);
@@ -167,7 +176,7 @@ export function SphericalPlayer({
       setIsLoadingDrive(true);
       setSyncStatusText('Conectando con Google Drive...');
       await authService.requestSignIn();
-      await scanDriveForMusic();
+      await loadMimusicaData(true);
     } catch (err: any) {
       console.warn('Login error:', err);
       setSyncStatusText(err?.message || 'Error de conexión');
@@ -177,43 +186,92 @@ export function SphericalPlayer({
     }
   };
 
-  // Scan music from Google Drive
-  const scanDriveForMusic = async () => {
+  // Dedicated scanner strictly for /mimusica and its subdirectories
+  // NEVER creates the folder and NEVER scans the whole drive
+  const loadMimusicaData = async (forceRefresh: boolean = false) => {
+    if (!authService.getAccessToken()) return;
     try {
       setIsLoadingDrive(true);
-      setSyncStatusText('Buscando pistas de música...');
-      
-      // 1. Try finding 'mimusica' or existing selected folder
-      let foundTracks = await driveService.listAudioFiles(undefined, undefined, (prog) => {
+      setSyncStatusText(forceRefresh ? 'Actualizando /mimusica...' : 'Consultando /mimusica...');
+      const structure = await driveService.getMimusicaStructure(forceRefresh, (prog) => {
         setSyncStatusText(prog.step);
       });
 
-      // 2. If empty, perform full drive audio search for any audio files
-      if (!foundTracks || foundTracks.length === 0) {
-        setSyncStatusText('Explorando biblioteca de audio en Drive...');
-        foundTracks = await driveService.scanAllDriveAudioFiles(undefined, (prog) => {
-          setSyncStatusText(prog.step);
-        });
-      }
+      setMimusicaStructure(structure);
 
-      if (foundTracks && foundTracks.length > 0) {
-        onTracksChange(foundTracks);
-        audioEngine.setQueue(foundTracks, 0, false);
-        setSyncStatusText(`¡${foundTracks.length} canciones cargadas!`);
+      if (!structure.exists) {
+        setMimusicaNotFound(true);
+        setSyncStatusText('Carpeta /mimusica no encontrada en Google Drive');
+        setInnerView('mimusica_selector');
       } else {
-        setSyncStatusText('No se encontraron archivos de audio.');
+        setMimusicaNotFound(false);
+        onFoldersChange(structure.subfolders.map((s) => s.folder));
+
+        if (structure.allTracks.length > 0) {
+          if (activeFolderMode.type === 'subfolder' && activeFolderMode.folderId) {
+            const subTracks = structure.tracksByFolderId[activeFolderMode.folderId] || structure.allTracks;
+            onTracksChange(subTracks);
+            audioEngine.setQueue(subTracks, 0, false);
+          } else {
+            onTracksChange(structure.allTracks);
+            audioEngine.setQueue(structure.allTracks, 0, false);
+            setActiveFolderMode({ type: 'all', name: 'Toda /mimusica' });
+          }
+          setSyncStatusText(`¡${structure.allTracks.length} canciones cargadas desde /mimusica!`);
+        } else {
+          setSyncStatusText('La carpeta /mimusica está vacía');
+        }
       }
       setTimeout(() => setSyncStatusText(''), 3500);
     } catch (e: any) {
-      console.error('Scan error:', e);
-      setSyncStatusText(e?.message || 'Error al leer Drive');
+      console.error('Error loading /mimusica:', e);
+      setSyncStatusText(e?.message || 'Error al leer /mimusica');
       setTimeout(() => setSyncStatusText(''), 4000);
     } finally {
       setIsLoadingDrive(false);
     }
   };
 
-  // Pick folder with Google Picker
+  // Automatically check /mimusica when user logs in
+  useEffect(() => {
+    if (user) {
+      loadMimusicaData(false);
+    }
+  }, [user]);
+
+  // Option 1: Play all music in /mimusica without reloading the player
+  const handleSelectPlayAll = (shuffle: boolean = false) => {
+    if (!mimusicaStructure || mimusicaStructure.allTracks.length === 0) {
+      setSyncStatusText('No hay canciones en /mimusica');
+      setTimeout(() => setSyncStatusText(''), 3000);
+      return;
+    }
+    const all = mimusicaStructure.allTracks;
+    onTracksChange(all);
+    audioEngine.setQueue(all, 0, true);
+    if (shuffle && !playerState.isShuffle) {
+      audioEngine.toggleShuffle();
+    }
+    setActiveFolderMode({ type: 'all', name: 'Toda /mimusica' });
+    setInnerView('player');
+  };
+
+  // Option 2: Play a specific subfolder of /mimusica without reloading the player
+  const handleSelectSubfolder = (folder: DriveFolder) => {
+    if (!mimusicaStructure) return;
+    const subTracks = mimusicaStructure.tracksByFolderId[folder.id] || [];
+    if (subTracks.length === 0) {
+      setSyncStatusText(`No hay canciones en "${folder.name}"`);
+      setTimeout(() => setSyncStatusText(''), 3000);
+      return;
+    }
+    onTracksChange(subTracks);
+    audioEngine.setQueue(subTracks, 0, true);
+    setActiveFolderMode({ type: 'subfolder', name: folder.name, folderId: folder.id });
+    setInnerView('player');
+  };
+
+  // Pick folder with Google Picker (optional fallback)
   const handlePickFolder = async () => {
     try {
       setIsLoadingDrive(true);
@@ -227,6 +285,7 @@ export function SphericalPlayer({
         if (folderTracks && folderTracks.length > 0) {
           onTracksChange(folderTracks);
           audioEngine.setQueue(folderTracks, 0, true);
+          setActiveFolderMode({ type: 'subfolder', name: picked.name, folderId: picked.id });
         }
       }
     } catch (e: any) {
@@ -241,6 +300,7 @@ export function SphericalPlayer({
   const handleLoadDemoTracks = () => {
     onTracksChange(DEMO_TRACKS);
     audioEngine.setQueue(DEMO_TRACKS, 0, true);
+    setActiveFolderMode({ type: 'all', name: 'Pistas de muestra' });
     setInnerView('player');
   };
 
@@ -380,6 +440,24 @@ export function SphericalPlayer({
                 </span>
                 <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${user ? 'bg-emerald-400 shadow-[0_0_10px_#34d399]' : 'bg-amber-400'}`} />
               </button>
+
+              {/* Active Folder Switcher Badge - In-Car Touch Friendly */}
+              {user && (
+                <button
+                  id="btn-active-folder-selector"
+                  onClick={() => setInnerView('mimusica_selector')}
+                  className="flex items-center justify-center gap-1.5 px-4 py-1.5 rounded-full bg-cyan-950/80 hover:bg-cyan-900 active:scale-95 border border-cyan-400/50 text-cyan-200 text-xs sm:text-sm font-semibold transition-all shadow-md backdrop-blur-md max-w-[280px]"
+                  title="Cambiar subcarpeta o reproducir toda /mimusica"
+                >
+                  <Folder className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span className="truncate">
+                    {activeFolderMode.type === 'all'
+                      ? `📁 /mimusica (Todo • ${tracks.length})`
+                      : `📂 ${activeFolderMode.name} (${tracks.length})`}
+                  </span>
+                  <ChevronRight className="w-3.5 h-3.5 text-cyan-400/80 shrink-0" />
+                </button>
+              )}
 
               {/* Status Notice or Audio Format Badge */}
               {syncStatusText ? (
@@ -557,16 +635,30 @@ export function SphericalPlayer({
                 </span>
               </div>
 
-              {/* Centered In-Sphere Playlist Button - Perfectly positioned inside bottom curvature */}
-              <button
-                id="btn-open-in-sphere-playlist"
-                onClick={() => setInnerView('playlist')}
-                className="flex items-center justify-center gap-2 py-2 px-5 rounded-full bg-cyan-950/80 hover:bg-cyan-900 active:scale-95 border-2 border-cyan-400/50 text-cyan-100 text-xs sm:text-sm font-bold transition-all shadow-md min-h-[42px] max-w-[210px]"
-                title="Ver lista de pistas dentro de la esfera"
-              >
-                <Disc className="w-4 h-4 text-cyan-300 animate-spin-slow shrink-0" />
-                <span className="truncate">Pistas ({tracks.length > 0 ? tracks.length : DEMO_TRACKS.length})</span>
-              </button>
+              {/* Centered In-Sphere Navigation Buttons - In-car touch friendly */}
+              <div className="flex items-center gap-2 max-w-[320px]">
+                {user && (
+                  <button
+                    id="btn-open-in-sphere-mimusica"
+                    onClick={() => setInnerView('mimusica_selector')}
+                    className="flex items-center justify-center gap-1.5 py-2 px-3.5 rounded-full bg-cyan-950/80 hover:bg-cyan-900 active:scale-95 border-2 border-cyan-400/50 text-cyan-100 text-xs sm:text-sm font-bold transition-all shadow-md min-h-[42px]"
+                    title="Explorar /mimusica y subcarpetas"
+                  >
+                    <Folder className="w-4 h-4 text-cyan-300 shrink-0" />
+                    <span className="truncate">/mimusica</span>
+                  </button>
+                )}
+
+                <button
+                  id="btn-open-in-sphere-playlist"
+                  onClick={() => setInnerView('playlist')}
+                  className="flex items-center justify-center gap-2 py-2 px-4 rounded-full bg-cyan-950/80 hover:bg-cyan-900 active:scale-95 border-2 border-cyan-400/50 text-cyan-100 text-xs sm:text-sm font-bold transition-all shadow-md min-h-[42px]"
+                  title="Ver lista de pistas dentro de la esfera"
+                >
+                  <Disc className="w-4 h-4 text-cyan-300 animate-spin-slow shrink-0" />
+                  <span className="truncate">Pistas ({tracks.length > 0 ? tracks.length : DEMO_TRACKS.length})</span>
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -593,10 +685,10 @@ export function SphericalPlayer({
 
               <button
                 id="btn-refresh-tracks"
-                onClick={user ? scanDriveForMusic : handleLoadDemoTracks}
+                onClick={user ? () => loadMimusicaData(true) : handleLoadDemoTracks}
                 disabled={isLoadingDrive}
                 className="w-10 h-10 flex items-center justify-center text-cyan-300 hover:text-white rounded-full bg-cyan-950/50 border border-cyan-500/30 active:scale-90"
-                title="Actualizar canciones"
+                title="Actualizar canciones de /mimusica"
               >
                 <RefreshCw className={`w-4 h-4 ${isLoadingDrive ? 'animate-spin' : ''}`} />
               </button>
@@ -724,24 +816,24 @@ export function SphericalPlayer({
                   </div>
 
                   <div className="w-full max-w-[260px] space-y-2.5 pt-2">
-                    {/* Pick Folder Button */}
+                    {/* Explore /mimusica Button */}
                     <button
-                      onClick={handlePickFolder}
+                      onClick={() => setInnerView('mimusica_selector')}
                       disabled={isLoadingDrive}
                       className="w-full flex items-center justify-center gap-2.5 px-4 py-3 rounded-full bg-cyan-600 hover:bg-cyan-500 active:scale-95 text-xs sm:text-sm font-bold text-white transition-all shadow-md min-h-[46px]"
                     >
                       <Folder className="w-4 h-4" />
-                      <span>Elegir Carpeta de Música</span>
+                      <span>Explorar /mimusica</span>
                     </button>
 
-                    {/* Scan Whole Drive Button */}
+                    {/* Sync /mimusica Button */}
                     <button
-                      onClick={scanDriveForMusic}
+                      onClick={() => loadMimusicaData(true)}
                       disabled={isLoadingDrive}
                       className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-full bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-400/40 text-xs sm:text-sm text-cyan-200 transition-all min-h-[44px]"
                     >
                       <RefreshCw className={`w-4 h-4 ${isLoadingDrive ? 'animate-spin' : ''}`} />
-                      <span>Escanear Todo Google Drive</span>
+                      <span>Sincronizar /mimusica</span>
                     </button>
 
                     {/* Disconnect Button */}
@@ -761,10 +853,7 @@ export function SphericalPlayer({
                   <div>
                     <h3 className="text-base font-bold text-white">Google Drive</h3>
                     <p className="text-xs text-slate-300 mt-1 max-w-[260px]">
-                      Conéctate para reproducir tus archivos de música en streaming de alta fidelidad.
-                    </p>
-                    <p className="text-[11px] text-cyan-400 font-mono mt-1">
-                      (Solo lectura • Sin permisos sensibles)
+                      Conéctate para reproducir tus canciones desde la carpeta <strong className="text-cyan-300">/mimusica</strong> de tu Drive.
                     </p>
                   </div>
 
@@ -810,6 +899,183 @@ export function SphericalPlayer({
               >
                 <Globe className="w-4 h-4" />
                 <span>Volver a la Esfera</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* VIEW 4: DIRECTORY /mimusica EXPLORER & SEAMLESS REPLAY SWITCHER */}
+        {/* ========================================================================= */}
+        {innerView === 'mimusica_selector' && (
+          <div className="relative w-full h-full flex flex-col justify-between p-5 sm:p-7 md:p-8 z-20 text-white select-none">
+            {/* Top Bar inside Sphere */}
+            <div className="flex items-center justify-between pt-2 border-b border-cyan-500/30 pb-3">
+              <button
+                id="btn-back-from-mimusica"
+                onClick={() => setInnerView('player')}
+                className="flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-cyan-200 hover:text-white px-3.5 py-2 rounded-full bg-cyan-950/70 border border-cyan-400/40 active:scale-90 transition-all min-h-[42px]"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Volver</span>
+              </button>
+
+              <div className="text-center">
+                <span className="text-xs sm:text-sm font-mono uppercase tracking-wider text-cyan-300 font-bold block">
+                  Directorio /mimusica
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  {activeFolderMode.name}
+                </span>
+              </div>
+
+              <button
+                id="btn-refresh-mimusica"
+                onClick={() => loadMimusicaData(true)}
+                disabled={isLoadingDrive}
+                className="w-10 h-10 flex items-center justify-center text-cyan-300 hover:text-white rounded-full bg-cyan-950/50 border border-cyan-500/30 active:scale-90"
+                title="Sincronizar /mimusica"
+              >
+                <RefreshCw className={`w-4 h-4 ${isLoadingDrive ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+
+            {/* Main Content inside Sphere */}
+            <div className="flex-1 overflow-y-auto my-3 space-y-3 pr-1 scrollbar-thin scrollbar-thumb-cyan-500/40">
+              {isLoadingDrive ? (
+                <div className="h-full flex flex-col items-center justify-center gap-3 text-cyan-300">
+                  <Loader2 className="w-8 h-8 animate-spin" />
+                  <p className="text-xs text-center font-mono">{syncStatusText || 'Leyendo /mimusica...'}</p>
+                </div>
+              ) : mimusicaNotFound ? (
+                <div className="flex flex-col items-center justify-center text-center p-4 bg-amber-950/40 border border-amber-500/40 rounded-2xl space-y-3">
+                  <AlertCircle className="w-10 h-10 text-amber-400" />
+                  <h4 className="text-sm font-bold text-amber-200">Carpeta /mimusica no encontrada</h4>
+                  <p className="text-xs text-slate-300 leading-relaxed max-w-[280px]">
+                    Crea una carpeta llamada <span className="font-mono text-cyan-300 font-bold">mimusica</span> en tu Google Drive y sube dentro tus canciones o subcarpetas (ej: Rock, Pop, etc.).
+                  </p>
+                  <button
+                    onClick={() => loadMimusicaData(true)}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-cyan-600 hover:bg-cyan-500 active:scale-95 text-xs font-bold text-white transition-all shadow-md min-h-[44px]"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    <span>Ya la he creado, comprobar</span>
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Mode 1: Play All Songs in /mimusica Card */}
+                  <div className={`p-3.5 rounded-2xl border transition-all ${
+                    activeFolderMode.type === 'all'
+                      ? 'bg-cyan-950/90 border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.3)]'
+                      : 'bg-cyan-950/40 border-cyan-500/30 hover:bg-cyan-950/60'
+                  }`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Folder className="w-5 h-5 text-cyan-400" />
+                        <div>
+                          <h4 className="text-xs sm:text-sm font-bold text-white">Toda la carpeta /mimusica</h4>
+                          <p className="text-[11px] text-cyan-300/80">
+                            {mimusicaStructure?.allTracks.length || 0} canciones en total
+                          </p>
+                        </div>
+                      </div>
+                      {activeFolderMode.type === 'all' && (
+                        <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-cyan-400/20 text-cyan-300 border border-cyan-400/50">
+                          En reproducción
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={() => handleSelectPlayAll(false)}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-full bg-cyan-600 hover:bg-cyan-500 active:scale-95 text-xs font-bold text-white transition-all min-h-[44px]"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                        <span>Reproducir Todo</span>
+                      </button>
+                      <button
+                        onClick={() => handleSelectPlayAll(true)}
+                        className="flex items-center justify-center gap-1 py-2 px-3.5 rounded-full bg-cyan-950/80 hover:bg-cyan-900 active:scale-95 border border-cyan-400/40 text-xs font-semibold text-cyan-200 transition-all min-h-[44px]"
+                        title="Reproducir en orden aleatorio"
+                      >
+                        <Shuffle className="w-3.5 h-3.5" />
+                        <span>Aleatorio</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Mode 2: Select Specific Subfolder */}
+                  <div className="pt-2">
+                    <div className="flex items-center justify-between mb-2 px-1">
+                      <span className="text-xs font-mono uppercase tracking-wider text-slate-300">
+                        Subcarpetas de /mimusica ({mimusicaStructure?.subfolders.length || 0})
+                      </span>
+                    </div>
+
+                    {(!mimusicaStructure || mimusicaStructure.subfolders.length === 0) ? (
+                      <div className="text-center py-6 px-4 bg-cyan-950/20 rounded-xl border border-cyan-500/20">
+                        <p className="text-xs text-slate-300">
+                          No tienes subcarpetas dentro de /mimusica.
+                        </p>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Puedes organizar tu música en carpetas (ej. /mimusica/Rock, /mimusica/Viajes) desde Google Drive y aparecerán aquí automáticamente.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {mimusicaStructure.subfolders.map((item) => {
+                          const isCurrent = activeFolderMode.type === 'subfolder' && activeFolderMode.folderId === item.folder.id;
+                          return (
+                            <button
+                              key={item.folder.id}
+                              onClick={() => handleSelectSubfolder(item.folder)}
+                              className={`w-full flex items-center justify-between p-3 rounded-xl border text-left transition-all active:scale-[0.98] min-h-[50px] ${
+                                isCurrent
+                                  ? 'bg-cyan-950/90 border-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.3)] text-white'
+                                  : 'bg-cyan-950/40 border-cyan-500/30 hover:bg-cyan-900/50 text-slate-200'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 truncate">
+                                <FolderOpen className={`w-4 h-4 shrink-0 ${isCurrent ? 'text-cyan-300' : 'text-cyan-400/70'}`} />
+                                <div className="truncate">
+                                  <p className="text-xs sm:text-sm font-semibold truncate">
+                                    {item.folder.name}
+                                  </p>
+                                  <p className="text-[11px] text-slate-400 font-mono">
+                                    {item.trackCount} {item.trackCount === 1 ? 'canción' : 'canciones'}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0 ml-2">
+                                {isCurrent ? (
+                                  <span className="flex items-center gap-1 text-[10px] font-mono uppercase text-cyan-300 bg-cyan-400/20 px-2 py-0.5 rounded-full border border-cyan-400/50">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                                    Activa
+                                  </span>
+                                ) : (
+                                  <Play className="w-3.5 h-3.5 text-cyan-400 opacity-60" />
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Bottom Bar: Quick Back */}
+            <div className="pt-2 border-t border-cyan-500/30 flex justify-center">
+              <button
+                onClick={() => setInnerView('player')}
+                className="text-xs sm:text-sm text-cyan-300 hover:text-white flex items-center gap-2 py-2 px-5 rounded-full bg-cyan-950/60 border border-cyan-500/30 active:scale-95 min-h-[40px]"
+              >
+                <Globe className="w-4 h-4" />
+                <span>Volver al Reproductor</span>
               </button>
             </div>
           </div>

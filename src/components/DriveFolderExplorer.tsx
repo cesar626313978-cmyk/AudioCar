@@ -111,10 +111,10 @@ export const DriveFolderExplorer: React.FC<DriveFolderExplorerProps> = ({
         const result = await driveService.listFolders(root.id);
         setFolders(result);
       } else {
+        setRootFolder(null);
         setFolderPath([{ id: 'root', name: MUSIC_ROOT_FOLDER_NAME }]);
         setCurrentFolderId('root');
-        const result = await driveService.listFolders('root');
-        setFolders(result);
+        setFolders([]);
       }
     } catch (e) {
       console.warn('Could not load root folders:', e);
@@ -296,7 +296,35 @@ export const DriveFolderExplorer: React.FC<DriveFolderExplorerProps> = ({
             <span>Sincronizar</span>
           </button>
 
-          {!isAtRoot && (
+          {isAtRoot ? (
+            allTracks.length > 0 && (
+              <>
+                {allTracks.length > 1 && (
+                  <button
+                    onClick={() => {
+                      audioEngine.setPlaybackMode('shuffle');
+                      const shuffled = [...allTracks].sort(() => Math.random() - 0.5);
+                      audioEngine.setQueue(shuffled, 0, true);
+                    }}
+                    className="hitbox-48 px-4 py-2 rounded-full bg-neutral-900 hover:bg-neutral-800 text-white border border-neutral-700 text-xs md:text-sm font-bold uppercase tracking-wider flex items-center gap-2 cursor-pointer"
+                    title="Mezclar todas las canciones de /mimusica aleatoriamente"
+                  >
+                    <Shuffle className="w-4 h-4 text-white" />
+                    <span className="hidden sm:inline">Mezclar Todo</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={() => audioEngine.setQueue(allTracks, 0, true)}
+                  className="hitbox-48 px-5 py-2 rounded-full bg-white hover:bg-neutral-200 active:scale-95 text-black text-xs md:text-sm font-bold uppercase tracking-wider shadow-md flex items-center gap-2 cursor-pointer"
+                  title="Reproducir todas las canciones de /mimusica y sus subcarpetas"
+                >
+                  <Play className="w-4 h-4 fill-black text-black" />
+                  <span>Reproducir Todo ({allTracks.length})</span>
+                </button>
+              </>
+            )
+          ) : (
             <>
               {currentFolderTracks.length > 1 && (
                 <button
@@ -379,7 +407,7 @@ export const DriveFolderExplorer: React.FC<DriveFolderExplorerProps> = ({
                   No hay canciones en {fullCurrentPath}
                 </p>
                 <p className="text-xs text-neutral-400 max-w-md mx-auto mt-1 leading-relaxed">
-                  Sube tus canciones (.mp3, .flac, .m4a) y carátulas a la carpeta correspondiente en tu Google Drive y pulsa "Sincronizar", o selecciona otra carpeta con música.
+                  Crea tu carpeta <span className="text-cyan-400 font-mono font-bold">mimusica</span> en Google Drive y añade tus canciones o subcarpetas (ej: Rock, Pop, etc.). Luego pulsa "Sincronizar".
                 </p>
                 <div className="pt-3">
                   <button

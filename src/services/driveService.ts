@@ -43,14 +43,25 @@ export function sanitizeAudioMimeType(incomingMime?: string, filename?: string):
   return 'audio/mpeg';
 }
 
+export interface MimusicaStructure {
+  exists: boolean;
+  rootFolder: DriveFolder | null;
+  subfolders: Array<{ folder: DriveFolder; trackCount: number }>;
+  allTracks: AudioTrack[];
+  rootOnlyTracks: AudioTrack[];
+  tracksByFolderId: Record<string, AudioTrack[]>;
+}
+
 export class DriveService {
   private blobCache: Map<string, string> = new Map();
   private folderArtworkCache: Map<string, { url: string; format: ImageFormat }> = new Map();
   private cachedMusicRootFolder: DriveFolder | null = null;
+  private cachedMimusicaStructure: MimusicaStructure | null = null;
   private folderDetailsCache: Map<string, { id: string; name: string; parentId?: string; path: string }> = new Map();
 
   public clearRootCache() {
     this.cachedMusicRootFolder = null;
+    this.cachedMimusicaStructure = null;
     this.folderArtworkCache.clear();
     this.folderDetailsCache.clear();
   }
@@ -120,10 +131,11 @@ export class DriveService {
   }
 
   /**
-   * Explicitly creates the "/mimusica" root folder in Google Drive.
+   * Clears the cached root folder so fresh Drive changes can be scanned.
    */
-  public async createMusicRootFolder(): Promise<DriveFolder | null> {
-    return await this.getMusicRootFolder(true);
+  public clearMusicRootCache(): void {
+    this.cachedMusicRootFolder = null;
+    this.cachedMimusicaStructure = null;
   }
 
   private getHeaders(tokenOverride?: string): HeadersInit {
@@ -138,11 +150,18 @@ export class DriveService {
   }
 
   /**
-   * Finds the user's dedicated root folder ("mimusica" or the user-selected folder via Google Picker).
+   * Finds the user's dedicated root folder ("mimusica").
+   * STRICT DIRECTIVE: AudioCar NEVER creates the folder.
+   * The user creates "/mimusica" in their Google Drive and places their music inside.
    */
-  async getMusicRootFolder(createIfNotFound: boolean = false): Promise<DriveFolder | null> {
-    if (this.cachedMusicRootFolder) {
+  async getMusicRootFolder(forceRefresh: boolean = false): Promise<DriveFolder | null> {
+    if (!forceRefresh && this.cachedMusicRootFolder) {
       return this.cachedMusicRootFolder;
+    }
+
+    if (forceRefresh) {
+      this.cachedMusicRootFolder = null;
+      this.cachedMimusicaStructure = null;
     }
 
     const token = authService.getAccessToken();
@@ -272,43 +291,121 @@ export class DriveService {
         return rootFolder;
       }
 
-      // 3. Only if explicitly requested and definitely not found, create "mimusica"
-      if (createIfNotFound) {
-        const createRes = await fetchWithDriveBackoff(`${DRIVE_API_URL}/files`, {
-          method: 'POST',
-          headers: {
-            ...this.getHeaders(token),
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            name: MUSIC_ROOT_FOLDER_NAME,
-            mimeType: 'application/vnd.google-apps.folder'
-          })
-        });
-
-        if (createRes.ok) {
-          const newFolderData = await createRes.json();
-          const newFolder: DriveFolder = {
-            id: newFolderData.id,
-            name: MUSIC_ROOT_FOLDER_NAME,
-            parentId: 'root',
-            path: `/${MUSIC_ROOT_FOLDER_NAME}`
-          };
-          this.cachedMusicRootFolder = newFolder;
-          this.folderDetailsCache.set(newFolder.id, {
-            id: newFolder.id,
-            name: newFolder.name,
-            parentId: 'root',
-            path: `/${newFolder.name}`
-          });
-          return newFolder;
-        }
-      }
+      // 3. User directive: Never auto-create "/mimusica".
+      // If not found, return null so UI invites the user to create "mimusica" in their Google Drive.
     } catch (e) {
       console.warn('Error locating "mimusica" folder in Drive:', e);
     }
 
     return null;
+  }
+
+  /**
+   * Scans and builds the complete structure of "/mimusica".
+   * Returns:
+   * - exists: whether "/mimusica" was found
+   * - rootFolder: the DriveFolder object for "/mimusica"
+   * - subfolders: list of direct subfolders with their track counts
+   * - allTracks: all audio tracks in "/mimusica" and its subdirectories
+   * - rootOnlyTracks: audio tracks directly in the root of "/mimusica"
+   * - tracksByFolderId: map of folder ID to its audio tracks
+   */
+  async getMimusicaStructure(
+    forceRefresh: boolean = false,
+    onProgress?: (progress: { percent: number; step: string }) => void
+  ): Promise<MimusicaStructure> {
+    if (!forceRefresh && this.cachedMimusicaStructure) {
+      return this.cachedMimusicaStructure;
+    }
+
+    const token = authService.getAccessToken();
+    if (!token) {
+      return {
+        exists: false,
+        rootFolder: null,
+        subfolders: [],
+        allTracks: [],
+        rootOnlyTracks: [],
+        tracksByFolderId: {}
+      };
+    }
+
+    onProgress?.({ percent: 15, step: 'Buscando carpeta /mimusica en Google Drive...' });
+    const rootFolder = await this.getMusicRootFolder(forceRefresh);
+    if (!rootFolder) {
+      this.cachedMimusicaStructure = {
+        exists: false,
+        rootFolder: null,
+        subfolders: [],
+        allTracks: [],
+        rootOnlyTracks: [],
+        tracksByFolderId: {}
+      };
+      return this.cachedMimusicaStructure;
+    }
+
+    onProgress?.({ percent: 30, step: 'Explorando subcarpetas de /mimusica...' });
+    // 1. Get direct subfolders
+    const directSubfolders = await this.listFolders(rootFolder.id);
+
+    onProgress?.({ percent: 45, step: 'Leyendo canciones en /mimusica...' });
+    // 2. Get all audio files in /mimusica and all its descendants
+    const allTracks = await this.listAudioFiles(undefined, undefined, onProgress);
+
+    // 3. Organize tracks by folder
+    const tracksByFolderId: Record<string, AudioTrack[]> = {};
+    tracksByFolderId[rootFolder.id] = [];
+
+    for (const sub of directSubfolders) {
+      tracksByFolderId[sub.id] = [];
+    }
+
+    const rootOnlyTracks: AudioTrack[] = [];
+
+    for (const track of allTracks) {
+      const parentId = track.folderId;
+      if (parentId && tracksByFolderId[parentId]) {
+        tracksByFolderId[parentId].push(track);
+      } else {
+        // Match by folder path or album name if parentId doesn't match directly
+        let matchedSub = false;
+        for (const sub of directSubfolders) {
+          const subLower = sub.name.toLowerCase();
+          if (
+            track.folderPath?.toLowerCase().includes(`/${subLower}`) ||
+            track.album?.toLowerCase() === subLower
+          ) {
+            tracksByFolderId[sub.id].push(track);
+            matchedSub = true;
+            break;
+          }
+        }
+        if (!matchedSub) {
+          tracksByFolderId[rootFolder.id].push(track);
+        }
+      }
+
+      if (track.folderId === rootFolder.id || track.folderPath === `/${rootFolder.name}`) {
+        rootOnlyTracks.push(track);
+      }
+    }
+
+    const subfoldersWithCounts = directSubfolders.map((folder) => ({
+      folder,
+      trackCount: tracksByFolderId[folder.id]?.length || 0
+    }));
+
+    const result: MimusicaStructure = {
+      exists: true,
+      rootFolder,
+      subfolders: subfoldersWithCounts,
+      allTracks,
+      rootOnlyTracks,
+      tracksByFolderId
+    };
+
+    this.cachedMimusicaStructure = result;
+    return result;
   }
 
   /**
