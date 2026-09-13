@@ -31,6 +31,7 @@ import { PlayerState, AudioTrack, DriveFolder, DriveAuthUser } from '../types';
 import { audioEngine } from '../services/audioEngine';
 import { authService } from '../services/authService';
 import { driveService, MimusicaStructure } from '../services/driveService';
+import { subscribeWeather, requestAndFetchWeather, LocalWeather } from '../services/weatherService';
 import { DEMO_TRACKS } from '../data/demoTracks';
 import { EclipseNeonBorder } from './EclipseNeonBorder';
 
@@ -68,6 +69,12 @@ export function SphericalPlayer({
   const [scrubTime, setScrubTime] = useState<number | null>(null);
   const [syncStatusText, setSyncStatusText] = useState<string>('');
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
+  const [localWeather, setLocalWeather] = useState<LocalWeather | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = subscribeWeather((w) => setLocalWeather(w));
+    return unsubscribe;
+  }, []);
 
   const sphereRef = useRef<HTMLDivElement>(null);
   const currentTrack = playerState.queue[playerState.currentTrackIndex] || null;
@@ -465,9 +472,34 @@ export function SphericalPlayer({
                   {syncStatusText}
                 </div>
               ) : (
-                <div className="text-[10px] sm:text-xs font-mono uppercase tracking-widest text-slate-300/90 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-                  {audioQualityTag}
+                <div className="flex items-center gap-2">
+                  <div className="text-[10px] sm:text-xs font-mono uppercase tracking-widest text-slate-300/90 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                    {audioQualityTag}
+                  </div>
+
+                  {/* Weather & Road Notice Chip - In-Car Glanceable */}
+                  <button
+                    id="btn-weather-glance"
+                    onClick={() => {
+                      if (!localWeather?.isGps) {
+                        requestAndFetchWeather();
+                      }
+                      window.dispatchEvent(new CustomEvent('audiocar-launch-ufo', { detail: { category: 'weather' } }));
+                    }}
+                    className="flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full bg-cyan-950/60 hover:bg-cyan-900/80 active:scale-95 border border-cyan-400/30 text-[10px] sm:text-[11px] font-mono text-cyan-200 transition-all shadow-sm backdrop-blur-md max-w-[180px] truncate"
+                    title="Toca para actualizar pronóstico o invocar el OVNI con el tiempo"
+                  >
+                    <span>{localWeather ? localWeather.icon : '🌤️'}</span>
+                    <span className="truncate font-semibold">
+                      {localWeather 
+                        ? `${localWeather.city}: ${localWeather.temperature}°C`
+                        : 'Tiempo Local'}
+                    </span>
+                    {localWeather?.roadNotice && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping shrink-0" title="Aviso vial activo" />
+                    )}
+                  </button>
                 </div>
               )}
             </div>

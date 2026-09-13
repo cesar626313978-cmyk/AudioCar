@@ -3,11 +3,13 @@ import {
   requestAndFetchWeather,
   fetchWeatherByIpFallback,
   getCachedWeather,
+  subscribeWeather,
   LocalWeather,
 } from '../services/weatherService';
 import {
   CURRENT_NEWS_MESSAGES,
   SECONDARY_MESSAGES,
+  getTimeGreetingMessage,
   BannerMessage,
 } from '../data/bannerMessages';
 
@@ -33,33 +35,60 @@ export const UfoBanner: React.FC = () => {
   const safetyCleanupRef = useRef<NodeJS.Timeout | null>(null);
   const newsIndexRef = useRef<number>(0);
   const secondaryIndexRef = useRef<number>(0);
+  const weatherVariantRef = useRef<number>(0);
 
   // Helper to build weather-specific banner messages
   const buildWeatherBannerMessage = useCallback((weather: LocalWeather, variant: number): BannerMessage => {
     if (variant === 0) {
-      // Current condition & temperature
+      // Current condition, real-feel, wind & humidity
       return {
         id: `weather-current-${Date.now()}`,
         category: 'weather',
-        tag: `TIEMPO · ${weather.city.toUpperCase()}`,
+        tag: `TIEMPO · ${weather.city.toUpperCase()}${weather.isGps ? ' (GPS)' : ''}`,
         headline: `${weather.icon} ${weather.city}: ${weather.temperature}°C (${weather.description})`,
         subtext: `Sensación ${weather.apparentTemperature}°C · Viento ${weather.windSpeed} km/h · Humedad ${weather.humidity}%`,
         icon: weather.icon,
         colorScheme: 'cyan',
       };
-    } else {
-      // Road condition notice or daily forecast
-      const notice = weather.roadNotice || `Pronóstico en ${weather.city}: Máx ${weather.tempMax}°C / Mín ${weather.tempMin}°C`;
+    } else if (variant === 1) {
+      // Daily forecast: max, min & precipitation probability
+      const rainText = weather.precipitationProb != null ? ` · Lluvia: ${weather.precipitationProb}%` : '';
+      const uvText = weather.uvIndex != null ? ` · UV: ${weather.uvIndex}` : '';
       return {
         id: `weather-forecast-${Date.now()}`,
         category: 'weather',
-        tag: weather.roadNotice ? 'AVISO EN CARRETERA' : `PRONÓSTICO · ${weather.city.toUpperCase()}`,
-        headline: notice,
-        subtext: weather.roadNotice
-          ? `★ Precaución al volante en la zona de ${weather.city} ★`
-          : `★ Máx ${weather.tempMax}°C · Mín ${weather.tempMin}°C · ${weather.description} ★`,
-        icon: weather.roadNotice ? '⚠️' : '🌤️',
-        colorScheme: weather.roadNotice ? 'amber' : 'emerald',
+        tag: `PRONÓSTICO · ${weather.city.toUpperCase()}`,
+        headline: `Pronóstico en ${weather.city}: Máx ${weather.tempMax}°C / Mín ${weather.tempMin}°C`,
+        subtext: `★ ${weather.description}${rainText}${uvText} · Buen viaje ★`,
+        icon: '🌤️',
+        colorScheme: 'emerald',
+      };
+    } else if (variant === 2) {
+      // Road and driving notice based on real meteorology
+      const hasNotice = Boolean(weather.roadNotice);
+      const noticeText = weather.roadNotice || `Visibilidad óptima en ${weather.city}: condiciones ideales para conducir`;
+      return {
+        id: `weather-road-${Date.now()}`,
+        category: 'weather',
+        tag: hasNotice ? 'AVISO EN CARRETERA' : `ESTADO VIAL · ${weather.city.toUpperCase()}`,
+        headline: noticeText,
+        subtext: hasNotice
+          ? `★ Precaución al volante en la zona de ${weather.city} · Modera velocidad ★`
+          : `★ Asfalto seco y buena adherencia en ruta · Disfruta la música ★`,
+        icon: hasNotice ? '⚠️' : '🚗',
+        colorScheme: hasNotice ? 'amber' : 'blue',
+      };
+    } else {
+      // Dynamic time-of-day greeting with town integration
+      const greeting = getTimeGreetingMessage();
+      return {
+        id: `weather-greeting-${Date.now()}`,
+        category: 'greeting',
+        tag: `${greeting.tag} · ${weather.city.toUpperCase()}`,
+        headline: greeting.headline,
+        subtext: `${greeting.subtext}`,
+        icon: greeting.icon,
+        colorScheme: greeting.colorScheme,
       };
     }
   }, []);
@@ -80,6 +109,17 @@ export const UfoBanner: React.FC = () => {
       setGeoState('denied');
     }
   }, [buildWeatherBannerMessage]);
+
+  // Subscribe to central weather service updates
+  useEffect(() => {
+    const unsubscribe = subscribeWeather((data) => {
+      setWeatherData(data);
+      if (data.isGps) {
+        setGeoState('granted');
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   // Try fetching IP weather on startup so weather is immediately available
   useEffect(() => {
@@ -119,40 +159,41 @@ export const UfoBanner: React.FC = () => {
     const weather = weatherData || getCachedWeather();
     const roll = Math.random();
 
-    // 1. TIEMPO LOCAL (50% de probabilidad si hay datos meteorológicos)
-    if (weather && roll < 0.50) {
-      const variant = Math.random() > 0.5 ? 1 : 0;
+    // 1. TIEMPO LOCAL (45% de probabilidad si hay datos meteorológicos)
+    if (weather && roll < 0.45) {
+      const variant = weatherVariantRef.current % 4;
+      weatherVariantRef.current += 1;
       return buildWeatherBannerMessage(weather, variant);
     }
 
-    // 2. Si no hay tiempo aún, invitar a activar con un aviso de alta prioridad
-    if (!weather && roll < 0.40) {
+    // 2. Si no hay datos aún o no se ha concedido GPS, invitar a activar con un aviso de alta visibilidad
+    if ((!weather || geoState !== 'granted') && roll < 0.35) {
       return {
         id: 'weather-prompt',
         category: 'weather',
         tag: 'TIEMPO & AVISOS EN RUTA',
-        headline: '¿Tiempo y avisos en carretera? Toca aquí',
-        subtext: '★ Activa la información meteorológica en tiempo real ★',
-        icon: '🌤️',
+        headline: '¿Activar tiempo local GPS? Toca aquí',
+        subtext: '★ Consulta temperatura, pronóstico y avisos de carretera en tiempo real ★',
+        icon: '🛰️',
         colorScheme: 'cyan',
       };
     }
 
     // 3. NOTICIAS ACTUALES DEL DÍA (40% de prioridad)
-    if (roll < 0.90) {
+    if (roll < 0.85) {
       const list = CURRENT_NEWS_MESSAGES;
       newsIndexRef.current = (newsIndexRef.current + 1) % list.length;
       return list[newsIndexRef.current];
     }
 
-    // 4. EFEMÉRIDES, FRASES O SALUDO (10% restante)
+    // 4. EFEMÉRIDES, FRASES FAMOSAS Y CONSEJOS (15% restante)
     const secondaryList = SECONDARY_MESSAGES;
     secondaryIndexRef.current = (secondaryIndexRef.current + 1) % secondaryList.length;
     return secondaryList[secondaryIndexRef.current];
-  }, [weatherData, buildWeatherBannerMessage]);
+  }, [weatherData, geoState, buildWeatherBannerMessage]);
 
   // Launch UFO with wide offscreen margins and guaranteed cleanup
-  const launchUfo = useCallback(() => {
+  const launchUfo = useCallback((customMsg?: BannerMessage) => {
     const isL2R = Math.random() > 0.5;
     const duration = 18 + Math.floor(Math.random() * 6); // 18s - 23s
 
@@ -228,7 +269,7 @@ export const UfoBanner: React.FC = () => {
     }
 
     // Set updated prioritized message
-    setCurrentMessage(pickNextMessage());
+    setCurrentMessage(customMsg || pickNextMessage());
 
     setFlight({
       id: Date.now(),
@@ -258,6 +299,26 @@ export const UfoBanner: React.FC = () => {
     }, nextDelayMs);
   }, [pickNextMessage]);
 
+  // Support on-demand invocation of UFO banner via custom window event
+  useEffect(() => {
+    const handleLaunchEvent = (e: Event) => {
+      const detail = (e as CustomEvent<{ category?: string }>).detail;
+      const weather = weatherData || getCachedWeather();
+      if (detail?.category === 'weather' && weather) {
+        const v = weatherVariantRef.current % 4;
+        weatherVariantRef.current += 1;
+        launchUfo(buildWeatherBannerMessage(weather, v));
+      } else {
+        launchUfo();
+      }
+    };
+
+    window.addEventListener('audiocar-launch-ufo', handleLaunchEvent);
+    return () => {
+      window.removeEventListener('audiocar-launch-ufo', handleLaunchEvent);
+    };
+  }, [launchUfo, weatherData, buildWeatherBannerMessage]);
+
   useEffect(() => {
     // Initial launch after 2 seconds
     const initialTimer = setTimeout(() => {
@@ -282,9 +343,14 @@ export const UfoBanner: React.FC = () => {
   const handleBannerOrUfoClick = (e: React.MouseEvent) => {
     e.stopPropagation();
 
-    // If it is the weather prompt, fetch weather
+    // If it is the weather prompt, fetch GPS weather
     if (currentMessage.id === 'weather-prompt' || (!weatherData && currentMessage.category === 'weather')) {
       handleRequestLocation();
+    } else if (currentMessage.category === 'weather' && weatherData) {
+      // Cycle directly to the next weather variant (current -> forecast -> road notice -> greeting)
+      const v = weatherVariantRef.current % 4;
+      weatherVariantRef.current += 1;
+      setCurrentMessage(buildWeatherBannerMessage(weatherData, v));
     } else {
       // Cycle to the next prioritized headline!
       setCurrentMessage(pickNextMessage());
@@ -621,15 +687,25 @@ const BannerCloth: React.FC<BannerClothProps> = ({ isL2R, message, geoState }) =
         {/* Dynamic Information Block */}
         <div className="flex flex-col text-left max-w-[280px] sm:max-w-[420px] md:max-w-[520px]">
           {/* Category Tag Badge */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span
               className={`text-[9px] sm:text-[10px] font-mono font-bold tracking-widest uppercase px-1.5 py-0.5 rounded border ${scheme.tagBg}`}
             >
               {message.tag}
             </span>
             {geoState === 'prompting' && (
-              <span className="text-[9px] font-mono text-cyan-800 animate-pulse">
+              <span className="text-[9px] font-mono text-cyan-800 font-bold animate-pulse">
                 Consultando satélite meteorológico...
+              </span>
+            )}
+            {message.id === 'weather-prompt' && (
+              <span className="text-[9px] font-mono bg-cyan-600 text-white px-1.5 py-0.5 rounded font-bold animate-pulse shadow-sm">
+                ¡Toca la pancarta para activar!
+              </span>
+            )}
+            {message.category === 'weather' && message.id !== 'weather-prompt' && (
+              <span className="text-[9px] font-mono text-cyan-800/80 font-medium hidden sm:inline">
+                • Toca para alternar aviso/pronóstico
               </span>
             )}
           </div>

@@ -10,8 +10,11 @@ export interface LocalWeather {
   tempMin: number;
   windSpeed: number;
   humidity: number;
+  precipitationProb?: number;
+  uvIndex?: number;
   roadNotice?: string;
   fetchedAt: number;
+  isGps?: boolean;
 }
 
 // Translate WMO Weather interpretation codes (WW) into Spanish + Icon + Road alert
@@ -26,7 +29,7 @@ export function parseWeatherCode(code: number): { description: string; icon: str
     return { description: 'Nuboso', icon: '☁️' };
   }
   if (code === 45 || code === 48) {
-    return { description: 'Niebla / Neblina', icon: '🌫️', roadNotice: '⚠️ Niebla: Reduce velocidad y usa luces cortas' };
+    return { description: 'Niebla / Neblina', icon: '🌫️', roadNotice: '⚠️ Niebla: Reduce velocidad y enciende luces' };
   }
   if (code >= 51 && code <= 55) {
     return { description: 'Llovizna leve', icon: '🌦️', roadNotice: '⚠️ Asfalto húmedo: modera la velocidad' };
@@ -51,10 +54,32 @@ export function parseWeatherCode(code: number): { description: string; icon: str
 
 let cachedWeather: LocalWeather | null = null;
 let isFetching = false;
+const listeners = new Set<(weather: LocalWeather) => void>();
 
-async function fetchWeatherForCoords(lat: number, lon: number, cityName: string): Promise<LocalWeather | null> {
+function notifyWeatherListeners(weather: LocalWeather) {
+  cachedWeather = weather;
+  listeners.forEach((listener) => {
+    try {
+      listener(weather);
+    } catch (e) {
+      console.warn('Weather listener error:', e);
+    }
+  });
+}
+
+export function subscribeWeather(callback: (weather: LocalWeather) => void): () => void {
+  listeners.add(callback);
+  if (cachedWeather) {
+    callback(cachedWeather);
+  }
+  return () => {
+    listeners.delete(callback);
+  };
+}
+
+async function fetchWeatherForCoords(lat: number, lon: number, cityName: string, isGps = false): Promise<LocalWeather | null> {
   try {
-    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=auto`;
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max&timezone=auto`;
     const weatherRes = await fetch(weatherUrl);
     if (!weatherRes.ok) return cachedWeather;
 
@@ -75,11 +100,14 @@ async function fetchWeatherForCoords(lat: number, lon: number, cityName: string)
       tempMin: Math.round(daily.temperature_2m_min?.[0] ?? (current.temperature_2m ?? 20) - 5),
       windSpeed: Math.round(current.wind_speed_10m ?? 0),
       humidity: Math.round(current.relative_humidity_2m ?? 50),
+      precipitationProb: daily.precipitation_probability_max?.[0] != null ? Math.round(daily.precipitation_probability_max[0]) : undefined,
+      uvIndex: daily.uv_index_max?.[0] != null ? Math.round(daily.uv_index_max[0]) : undefined,
       roadNotice: parsed.roadNotice,
       fetchedAt: Date.now(),
+      isGps,
     };
 
-    cachedWeather = result;
+    notifyWeatherListeners(result);
     return result;
   } catch {
     return cachedWeather;
@@ -92,6 +120,7 @@ export async function fetchWeatherByIpFallback(): Promise<LocalWeather | null> {
     return cachedWeather;
   }
   try {
+    // 1. Primary IP Geo Service
     const geoRes = await fetch('https://get.geojs.io/v1/ip/geo.json');
     if (geoRes.ok) {
       const data = await geoRes.json();
@@ -99,17 +128,34 @@ export async function fetchWeatherByIpFallback(): Promise<LocalWeather | null> {
       const lon = parseFloat(data.longitude);
       const city = data.city || data.region || 'Tu zona';
       if (!isNaN(lat) && !isNaN(lon)) {
-        return await fetchWeatherForCoords(lat, lon, city);
+        return await fetchWeatherForCoords(lat, lon, city, false);
       }
     }
   } catch {
-    // fallback
+    // fallback to secondary
   }
+
+  try {
+    // 2. Secondary IP Geo Service fallback
+    const freeGeoRes = await fetch('https://freeipapi.com/api/json');
+    if (freeGeoRes.ok) {
+      const fData = await freeGeoRes.json();
+      const lat = parseFloat(fData.latitude);
+      const lon = parseFloat(fData.longitude);
+      const city = fData.cityName || fData.regionName || 'Tu zona';
+      if (!isNaN(lat) && !isNaN(lon)) {
+        return await fetchWeatherForCoords(lat, lon, city, false);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
   return null;
 }
 
 export async function requestAndFetchWeather(): Promise<LocalWeather | null> {
-  if (cachedWeather && Date.now() - cachedWeather.fetchedAt < 1000 * 60 * 15) {
+  if (cachedWeather && cachedWeather.isGps && Date.now() - cachedWeather.fetchedAt < 1000 * 60 * 10) {
     return cachedWeather;
   }
 
@@ -140,7 +186,7 @@ export async function requestAndFetchWeather(): Promise<LocalWeather | null> {
             // fallback
           }
 
-          const weather = await fetchWeatherForCoords(lat, lon, cityName);
+          const weather = await fetchWeatherForCoords(lat, lon, cityName, true);
           isFetching = false;
           resolve(weather);
         } catch {
